@@ -51,7 +51,7 @@ npm start -- --rebuild
 
 ## 功能
 
-- 按 Agent / 飞书 chat / 工作目录筛选
+- 按 Agent / 飞书 chat / 工作目录 / 更新时间筛选
 - 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
 - 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）
 - 每 5 秒自动刷新会话列表，详情随会话内容变化刷新

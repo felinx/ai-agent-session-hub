@@ -25,6 +25,7 @@ test('stripBridgeContext 与合成文本识别', () => {
   assert.equal(deriveTitle(wrapped), '检查构建');
   assert.equal(isSyntheticUserText('<environment_context>...</environment_context>'), true);
   assert.equal(isSyntheticUserText('<recommended_plugins>x</recommended_plugins>'), true);
+  assert.equal(isSyntheticUserText('<system-reminder>x</system-reminder>'), true);
   assert.equal(isSyntheticUserText('你好'), false);
 });
 

@@ -1,9 +1,12 @@
 const state = {
   agent: 'all',
   q: '',
+  chat: '',
+  cwd: '',
+  since: '',
   selected: null,
   sessions: [],
-  facets: { agents: [] },
+  facets: { agents: [], chats: [], cwds: [] },
   detailSignature: null,
   loadingSessions: false
 };
@@ -16,6 +19,7 @@ const detailEl = $('#session-detail');
 const statusEl = $('#status');
 const searchEl = $('#search');
 const chipsEl = $('#agent-chips');
+const filtersEl = $('#filters');
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -51,6 +55,9 @@ function writeHash() {
   const params = new URLSearchParams();
   if (state.agent !== 'all') params.set('agent', state.agent);
   if (state.q) params.set('q', state.q);
+  if (state.chat) params.set('chat', state.chat);
+  if (state.cwd) params.set('cwd', state.cwd);
+  if (state.since) params.set('since', state.since);
   if (state.selected) params.set('session', state.selected);
   const next = params.toString();
   const target = next ? `#${next}` : location.pathname;
@@ -61,6 +68,9 @@ function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   state.agent = params.get('agent') || 'all';
   state.q = params.get('q') || '';
+  state.chat = params.get('chat') || '';
+  state.cwd = params.get('cwd') || '';
+  state.since = params.get('since') || '';
   state.selected = params.get('session') || null;
   searchEl.value = state.q;
 }
@@ -86,6 +96,48 @@ function renderChips() {
       `${entry.agent === 'all' ? '全部' : entry.agent} ${entry.count}`
     ]));
   }
+}
+
+function selectEl(name, options, value) {
+  const select = el('select', {
+    class: 'filter-select',
+    'aria-label': name,
+    onchange: (event) => {
+      state[name] = event.target.value;
+      writeHash();
+      loadSessions();
+    }
+  });
+  for (const [optionValue, label] of options) {
+    select.append(el('option', {
+      value: optionValue,
+      selected: optionValue === value ? '' : undefined,
+      text: label
+    }));
+  }
+  return select;
+}
+
+function renderFilters() {
+  const chats = state.facets.chats ?? [];
+  const cwds = state.facets.cwds ?? [];
+
+  filtersEl.replaceChildren(
+    selectEl('chat', [
+      ['', '所有 chat'],
+      ...chats.map(item => [item.chatId, item.chatId])
+    ], state.chat),
+    selectEl('cwd', [
+      ['', '所有目录'],
+      ...cwds.map(item => [item.cwd, `${item.cwd} (${item.count})`])
+    ], state.cwd),
+    selectEl('since', [
+      ['', '所有时间'],
+      ['86400000', '24 小时内'],
+      ['604800000', '7 天内'],
+      ['2592000000', '30 天内']
+    ], state.since)
+  );
 }
 
 function renderList() {
@@ -134,6 +186,9 @@ async function loadSessions() {
   const params = new URLSearchParams();
   if (state.agent !== 'all') params.set('agent', state.agent);
   if (state.q) params.set('q', state.q);
+  if (state.chat) params.set('chat', state.chat);
+  if (state.cwd) params.set('cwd', state.cwd);
+  if (state.since) params.set('since', String(Date.now() - Number(state.since)));
 
   try {
     const [sessionsRes, healthRes] = await Promise.all([
@@ -148,6 +203,7 @@ async function loadSessions() {
 
     errorEl.hidden = true;
     renderChips();
+    renderFilters();
     renderList();
     statusEl.textContent = statusLine(health);
     statusEl.title = health?.warnings?.join('\n') ?? '';

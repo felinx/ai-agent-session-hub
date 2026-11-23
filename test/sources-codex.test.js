@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, copyFileSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, appendFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,34 @@ test('缺失索引时回退首条真实用户文本', async () => {
   const [file] = await discoverCodex({ roots: { codex: root } });
   const p = await parseCodex(file.sourcePath, file);
   assert.equal(p.title, '检查构建失败');
+});
+
+test('custom_tool_call_output 的 content block 数组转文本', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-codex-array-'));
+  const target = path.join(dir, 'rollout-array.jsonl');
+  writeFileSync(target, [
+    JSON.stringify({
+      type: 'session_meta', payload: { id: 'array-1', cwd: '/tmp/codex' }
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '执行' }] }
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'custom_tool_call', call_id: 'call_1', name: 'exec', input: '{}' }
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call_output', call_id: 'call_1',
+        output: [{ type: 'input_text', text: 'a' }, { type: 'input_text', text: 'b' }]
+      }
+    })
+  ].join('\n') + '\n');
+
+  const p = await parseCodex(target);
+  assert.equal(p.messages[0].toolResults[0].output, 'a\nb');
 });
 
 test('末尾半行与未知事件被跳过', async () => {

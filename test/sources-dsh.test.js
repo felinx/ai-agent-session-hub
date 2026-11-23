@@ -43,6 +43,21 @@ test('parseDsh 提取元数据、标题、消息与工具', async () => {
   assert.deepEqual(p.messages[1].toolResults[0], { callId: 'tool-1', output: '# README', isError: false });
 });
 
+test('parseDsh 跳过 harness 上下文消息', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-'));
+  const file = writeSession(root, 'slug', 'session-context', [
+    { type: 'session', id: 'session-context', createdAt: 1, cwd: '/tmp/dsh' },
+    { type: 'user/message', data: { id: 'u1', role: 'user', content: [{ type: 'text', text: '真实问题' }], source: { kind: 'user' } } },
+    { type: 'user/message', data: { id: 'u2', role: 'user', content: [{ type: 'text', text: '运行时上下文' }], source: { kind: 'runtime-context' } } },
+    { type: 'user/message', data: { id: 'u3', role: 'user', content: [{ type: 'text', text: '技能目录' }], source: { kind: 'skill-catalog' } } },
+    { type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: '回答' }] } } }
+  ]);
+
+  const p = await parseDsh(file);
+  assert.equal(p.messages.length, 2);
+  assert.equal(p.messages[0].text, '真实问题');
+});
+
 test('discoverDsh 找出 zstd 会话并按目录名提取 chatId', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-'));
   writeSession(root, 'slug', 'session-33333333-3333-4333-8333-333333333333', LINES);

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -47,6 +48,18 @@ async function makeServer() {
   };
 }
 
+function rawGet(hostname, port, path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname, port, path, headers }, (res) => {
+      let body = '';
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 test('GET /api/sessions 返回列表与 facets', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
@@ -67,6 +80,10 @@ test('过滤与搜索参数生效', async (t) => {
 
   const byQuery = await (await fetch(s.base + '/api/sessions?q=构建失败')).json();
   assert.equal(byQuery.sessions.length, 1);
+
+  const bySince = await (await fetch(s.base + '/api/sessions?since=250')).json();
+  assert.equal(bySince.sessions.length, 1);
+  assert.equal(bySince.sessions[0].key, 'claude:a');
 });
 
 test('GET /api/session 返回详情，未知 key 404', async (t) => {
@@ -88,6 +105,20 @@ test('GET /api/health 报告状态', async (t) => {
   assert.equal(h.ok, true);
   assert.equal(h.sessions, 2);
   assert.equal(h.scanning, false);
+});
+
+test('拒绝非本机 Host 并附带安全响应头', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+  const { hostname, port } = new URL(s.base);
+
+  const evil = await rawGet(hostname, port, '/api/sessions', { Host: 'evil.example.com' });
+  assert.equal(evil.status, 403);
+
+  const ok = await rawGet(hostname, port, '/api/health', { Host: `127.0.0.1:${port}` });
+  assert.equal(ok.status, 200);
+  assert.match(ok.headers['content-security-policy'], /default-src 'self'/);
+  assert.equal(ok.headers['x-content-type-options'], 'nosniff');
 });
 
 test('静态文件与路径穿越防护', async (t) => {

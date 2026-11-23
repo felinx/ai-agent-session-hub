@@ -7,14 +7,20 @@ import {
 
 const SESSION_FILE = 'session.v4.jsonl.zstd';
 const LARK_DIR_RE = /^lark-(oc_[A-Za-z0-9]+)/;
+const VISIBLE_USER_KINDS = new Set(['user', 'agent-message']);
+
+function isMissing(err) {
+  return err?.code === 'ENOENT' || err?.code === 'ENOTDIR';
+}
 
 export async function discoverDsh(config) {
   const sessionsRoot = path.join(config.roots.dsh, 'sessions');
   let slugs;
   try {
     slugs = await readdir(sessionsRoot, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (err) {
+    if (isMissing(err)) return [];
+    throw err;
   }
 
   const discovered = [];
@@ -25,8 +31,9 @@ export async function discoverDsh(config) {
     let dirs;
     try {
       dirs = await readdir(slugPath, { withFileTypes: true });
-    } catch {
-      continue;
+    } catch (err) {
+      if (isMissing(err)) continue;
+      throw err;
     }
 
     for (const dir of dirs) {
@@ -36,8 +43,9 @@ export async function discoverDsh(config) {
       let stats;
       try {
         stats = await stat(sourcePath);
-      } catch {
-        continue;
+      } catch (err) {
+        if (isMissing(err)) continue;
+        throw err;
       }
 
       discovered.push({
@@ -114,6 +122,8 @@ export async function parseDsh(sourcePath, discovery) {
         break;
       }
       case 'user/message': {
+        const kind = data.source?.kind;
+        if (kind !== undefined && !VISIBLE_USER_KINDS.has(kind)) break;
         const cleaned = stripBridgeContext(textFromContent(data.content ?? data.message?.content));
         if (!cleaned || isSyntheticUserText(cleaned)) break;
         if (!firstUserText) firstUserText = cleaned;

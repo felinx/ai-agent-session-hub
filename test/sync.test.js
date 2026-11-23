@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, copyFileSync, appendFileSync, utimesSync, unlinkSync
+  mkdtempSync, mkdirSync, writeFileSync, copyFileSync, appendFileSync, utimesSync, unlinkSync, chmodSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -98,6 +98,53 @@ test('删除源文件后清理会话', async () => {
   const r = await syncOnce(db, config);
   assert.equal(r.removed, 1);
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 2);
+});
+
+test('源根目录不可读时产生 warning 且不误删', async () => {
+  const { db, config } = setup();
+  await syncOnce(db, config);
+
+  const projectsDir = path.join(config.roots.claude, 'projects');
+  chmodSync(projectsDir, 0o000);
+  try {
+    const r = await syncOnce(db, config);
+    assert.ok(r.warnings.length > 0);
+    assert.equal(r.removed, 0);
+    assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 3);
+  } finally {
+    chmodSync(projectsDir, 0o755);
+  }
+});
+
+test('仅标题元数据变化也会刷新', async () => {
+  const { db, config } = setup();
+  await syncOnce(db, config);
+
+  const titlePath = path.join(config.roots.claude, 'projects', 'p1', CLAUDE_ID, 'custom-title.json');
+  mkdirSync(path.dirname(titlePath), { recursive: true });
+  writeFileSync(titlePath, JSON.stringify({ customTitle: '新标题' }));
+
+  const r = await syncOnce(db, config);
+  assert.equal(r.updated, 1);
+  const row = db.prepare('SELECT title FROM sessions WHERE key = ?').get(`claude:${CLAUDE_ID}`);
+  assert.equal(row.title, '新标题');
+});
+
+test('仅 catalog 变化也会刷新 chatId', async () => {
+  const { db, config } = setup();
+  await syncOnce(db, config);
+
+  const profileDir = path.join(config.roots.larkChannel, 'profiles', 'claude');
+  mkdirSync(profileDir, { recursive: true });
+  writeFileSync(
+    path.join(profileDir, 'sessions.json.catalog.json'),
+    JSON.stringify([{ scopeId: 'oc_NEW', agentId: 'claude', sessionId: CLAUDE_ID }])
+  );
+
+  const r = await syncOnce(db, config);
+  assert.equal(r.updated, 1);
+  const row = db.prepare('SELECT chat_id FROM sessions WHERE key = ?').get(`claude:${CLAUDE_ID}`);
+  assert.equal(row.chat_id, 'oc_NEW');
 });
 
 test('源根目录不存在时仍完成并产生 warning', async () => {

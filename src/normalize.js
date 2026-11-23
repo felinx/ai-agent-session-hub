@@ -1,7 +1,7 @@
 const BRIDGE_CONTEXT_RE = /<bridge_(context|instructions)>[\s\S]*?<\/bridge_\1>/g;
 
 const SYNTHETIC_PREFIX_RE =
-  /^<(environment_context|recommended_plugins|user_instructions|local-command-caveat|local-command-stdout|command-name)\b/;
+  /^<(environment_context|recommended_plugins|user_instructions|local-command-caveat|local-command-stdout|command-name|system-reminder)\b/;
 
 export function textFromContent(content) {
   if (typeof content === 'string') return content;

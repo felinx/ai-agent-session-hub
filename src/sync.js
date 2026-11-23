@@ -11,6 +11,12 @@ const SOURCES = [
   { agent: 'dsh', discover: discoverDsh, parse: parseDsh }
 ];
 
+function getSessionMeta(db, sourcePath) {
+  return db.prepare(
+    'SELECT key, title, chat_id AS chatId FROM sessions WHERE source_path = ?'
+  ).get(sourcePath) ?? null;
+}
+
 export async function syncOnce(db, config, opts = {}) {
   const chatMap = opts.chatMap ?? await buildChatMap(config);
   const force = !!opts.force;
@@ -43,8 +49,15 @@ export async function syncOnce(db, config, opts = {}) {
     for (const file of results[i].files) {
       discovered.push(file);
 
+      const existing = getSessionMeta(db, file.sourcePath);
+      const chatKey = existing?.key ?? `${file.agent}:${file.nativeId}`;
+      const desiredChatId = chatMap.get(chatKey) ?? file.chatHint ?? null;
+      const metadataStale = !existing ||
+        (file.titleHint !== undefined && file.titleHint !== existing.title) ||
+        desiredChatId !== existing.chatId;
+
       const state = getSyncState(db, file.sourcePath);
-      if (!force && state && state.mtimeMs === file.mtimeMs && state.size === file.size) {
+      if (!force && !metadataStale && state && state.mtimeMs === file.mtimeMs && state.size === file.size) {
         unchanged += 1;
         continue;
       }

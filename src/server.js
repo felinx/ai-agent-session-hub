@@ -12,10 +12,30 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
+const SECURITY_HEADERS = {
+  'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Cross-Origin-Resource-Policy': 'same-origin'
+};
+
+function isAllowedHost(hostHeader) {
+  if (!hostHeader) return false;
+  let hostname;
+  try {
+    hostname = new URL(`http://${hostHeader}`).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === '127.0.0.1' || hostname === 'localhost' ||
+    hostname === '[::1]' || hostname === '::1';
+}
+
 function sendJson(res, status, body) {
   res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
+    ...SECURITY_HEADERS,
+    'Content-Type': 'application/json; charset=utf-8'
   });
   res.end(JSON.stringify(body));
 }
@@ -28,6 +48,10 @@ export function createServer({ db, state, publicDir }) {
     try {
       if (req.method !== 'GET') {
         return sendJson(res, 405, { error: 'method not allowed' });
+      }
+
+      if (!isAllowedHost(req.headers.host)) {
+        return sendJson(res, 403, { error: 'forbidden host' });
       }
 
       const url = new URL(req.url, 'http://localhost');
@@ -46,12 +70,14 @@ export function createServer({ db, state, publicDir }) {
       if (pathname === '/api/sessions') {
         const params = url.searchParams;
         const rawLimit = Number(params.get('limit'));
+        const rawSince = Number(params.get('since'));
         const sessions = listSessions(db, {
           agent: params.get('agent') || undefined,
           chat: params.get('chat') || undefined,
           cwd: params.get('cwd') || undefined,
           q: params.get('q') || undefined,
-          limit: Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined,
+          since: Number.isFinite(rawSince) && rawSince > 0 ? rawSince : undefined,
+          limit: Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 5000) : undefined,
           includeArchived: params.get('archived') !== '0'
         });
         return sendJson(res, 200, { sessions, facets: getFacets(db) });
@@ -94,8 +120,8 @@ export function createServer({ db, state, publicDir }) {
       }
 
       res.writeHead(200, {
-        'Content-Type': MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream',
-        'Cache-Control': 'no-store'
+        ...SECURITY_HEADERS,
+        'Content-Type': MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream'
       });
       res.end(data);
     } catch {

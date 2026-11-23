@@ -7,13 +7,18 @@ import {
 const SESSION_FILE_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
 
+function isMissing(err) {
+  return err?.code === 'ENOENT' || err?.code === 'ENOTDIR';
+}
+
 export async function discoverClaude(config) {
   const projectsRoot = path.join(config.roots.claude, 'projects');
   let projectDirs;
   try {
     projectDirs = await readdir(projectsRoot, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (err) {
+    if (isMissing(err)) return [];
+    throw err;
   }
 
   const discovered = [];
@@ -24,8 +29,9 @@ export async function discoverClaude(config) {
     let entries;
     try {
       entries = await readdir(dirPath, { withFileTypes: true });
-    } catch {
-      continue;
+    } catch (err) {
+      if (isMissing(err)) continue;
+      throw err;
     }
 
     for (const entry of entries) {
@@ -35,8 +41,9 @@ export async function discoverClaude(config) {
       let stats;
       try {
         stats = await stat(sourcePath);
-      } catch {
-        continue;
+      } catch (err) {
+        if (isMissing(err)) continue;
+        throw err;
       }
 
       const nativeId = entry.name.slice(0, -'.jsonl'.length);

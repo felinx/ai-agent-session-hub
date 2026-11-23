@@ -1,14 +1,19 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync, chmodSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const dbPaths = new WeakMap();
+const APP_DB_DIR = path.join(os.homedir(), '.session-hub');
 
 function secureDbFiles(dbPath) {
   if (!dbPath || dbPath === ':memory:') return;
-  mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
-  try { chmodSync(path.dirname(dbPath), 0o700); } catch {}
+  const dir = path.dirname(dbPath);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (path.resolve(dir) === path.resolve(APP_DB_DIR)) {
+    try { chmodSync(dir, 0o700); } catch {}
+  }
   for (const suffix of ['', '-wal', '-shm']) {
     try { chmodSync(dbPath + suffix, 0o600); } catch {}
   }
@@ -44,9 +49,18 @@ function transaction(db, fn) {
 
 export function replaceSession(db, session, messages, sync) {
   transaction(db, () => {
+    const replaced = db.prepare(
+      'SELECT source_path FROM sessions WHERE key = ? OR source_path = ?'
+    ).all(session.key, session.sourcePath);
+
     db.prepare('DELETE FROM messages_fts WHERE session_key = ?').run(session.key);
     db.prepare('DELETE FROM sessions WHERE key = ? OR source_path = ?')
       .run(session.key, session.sourcePath);
+
+    const deleteSyncState = db.prepare('DELETE FROM sync_state WHERE source_path = ?');
+    for (const row of replaced) {
+      if (row.source_path !== session.sourcePath) deleteSyncState.run(row.source_path);
+    }
 
     db.prepare(`
       INSERT INTO sessions (
@@ -166,13 +180,14 @@ function toSession(row) {
 }
 
 export function listSessions(db, query = {}) {
-  const { agent, chat, cwd, q, limit = 500, includeArchived = true } = query;
+  const { agent, chat, cwd, q, since, limit = 500, includeArchived = true } = query;
   const where = [];
   const params = [];
 
   if (agent) { where.push('agent = ?'); params.push(agent); }
   if (chat) { where.push('chat_id = ?'); params.push(chat); }
   if (cwd) { where.push('cwd = ?'); params.push(cwd); }
+  if (since) { where.push('updated_at >= ?'); params.push(since); }
   if (!includeArchived) where.push('archived = 0');
 
   if (q) {

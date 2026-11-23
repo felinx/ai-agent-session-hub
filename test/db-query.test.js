@@ -44,6 +44,7 @@ test('listSessions 过滤、排序与 limit', () => {
   assert.deepEqual(listSessions(db, { agent: 'codex' }).map(s => s.key), ['codex:b']);
   assert.deepEqual(listSessions(db, { chat: 'oc_A' }).map(s => s.key), ['claude:a']);
   assert.deepEqual(listSessions(db, { cwd: '/p1' }).map(s => s.key), ['claude:a', 'dsh:c']);
+  assert.deepEqual(listSessions(db, { since: 150 }).map(s => s.key), ['claude:a', 'codex:b']);
   assert.equal(listSessions(db, { limit: 2 }).length, 2);
   assert.equal(listSessions(db, { q: '构建失败' }).length, 1);
   assert.deepEqual(listSessions(db, { q: '构建失败' }).map(s => s.key), ['claude:a']);

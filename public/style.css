@@ -71,6 +71,28 @@ body {
   color: var(--accent);
 }
 
+.filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter-select {
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  max-width: 260px;
+}
+
+.filter-select:focus {
+  outline: 2px solid #bfd3ff;
+  border-color: var(--accent);
+}
+
 #search {
   flex: 1 1 220px;
   min-width: 160px;

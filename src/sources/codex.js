@@ -6,6 +6,10 @@ import {
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+function isMissing(err) {
+  return err?.code === 'ENOENT' || err?.code === 'ENOTDIR';
+}
+
 async function readFirstLine(filePath, maxBytes = 65536) {
   const handle = await open(filePath, 'r');
   try {
@@ -24,8 +28,9 @@ async function readSessionIndex(indexPath) {
   let raw;
   try {
     raw = await readFile(indexPath, 'utf8');
-  } catch {
-    return titles;
+  } catch (err) {
+    if (isMissing(err)) return titles;
+    throw err;
   }
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -42,8 +47,16 @@ async function readSessionIndex(indexPath) {
 
 async function toDiscovered(sourcePath, archived, titles) {
   let meta = {};
+
+  let firstLine;
   try {
-    const first = JSON.parse(await readFirstLine(sourcePath));
+    firstLine = await readFirstLine(sourcePath);
+  } catch (err) {
+    if (isMissing(err)) return null;
+    throw err;
+  }
+  try {
+    const first = JSON.parse(firstLine);
     if (first?.type === 'session_meta' && first.payload && typeof first.payload === 'object') {
       meta = first.payload;
     }
@@ -54,8 +67,9 @@ async function toDiscovered(sourcePath, archived, titles) {
   let stats;
   try {
     stats = await stat(sourcePath);
-  } catch {
-    return null;
+  } catch (err) {
+    if (isMissing(err)) return null;
+    throw err;
   }
 
   const nativeId = meta.id || meta.session_id ||
@@ -76,8 +90,9 @@ async function walk(dirPath, archived, titles, out) {
   let entries;
   try {
     entries = await readdir(dirPath, { withFileTypes: true });
-  } catch {
-    return;
+  } catch (err) {
+    if (isMissing(err)) return;
+    throw err;
   }
   for (const entry of entries) {
     const full = path.join(dirPath, entry.name);
@@ -99,7 +114,9 @@ export async function discoverCodex(config) {
   let archivedEntries = [];
   try {
     archivedEntries = await readdir(path.join(root, 'archived_sessions'), { withFileTypes: true });
-  } catch {}
+  } catch (err) {
+    if (!isMissing(err)) throw err;
+  }
   for (const entry of archivedEntries) {
     if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
     const file = await toDiscovered(path.join(root, 'archived_sessions', entry.name), true, titles);
@@ -208,7 +225,9 @@ export async function parseCodex(sourcePath, discovery) {
       const callId = payload.call_id || payload.id || null;
       const output = typeof payload.output === 'string'
         ? payload.output
-        : JSON.stringify(payload.output ?? '');
+        : Array.isArray(payload.output)
+          ? textFromContent(payload.output)
+          : JSON.stringify(payload.output ?? '');
       const result = { callId, output, isError: !!payload.is_error };
 
       let owner = ownerFor(callId, callOwner);

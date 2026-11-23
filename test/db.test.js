@@ -92,7 +92,18 @@ test('超大工具结果可入库并读回', () => {
   db.close();
 });
 
-test('文件数据库目录 0700、文件 0600', () => {
+test('同 key 不同路径重写时清理旧路径的 sync_state', () => {
+  const db = freshDb();
+  replaceSession(db, makeSession({ sourcePath: '/p/a.jsonl' }), [{ role: 'user', text: 'a' }], { mtimeMs: 1, size: 1 });
+  replaceSession(db, makeSession({ sourcePath: '/p/b.jsonl' }), [{ role: 'user', text: 'b' }], { mtimeMs: 2, size: 2 });
+
+  assert.equal(getSyncState(db, '/p/a.jsonl'), null);
+  assert.deepEqual({ ...getSyncState(db, '/p/b.jsonl') }, { mtimeMs: 2, size: 2 });
+  assert.equal(db.prepare('SELECT source_path FROM sessions').get().source_path, '/p/b.jsonl');
+  db.close();
+});
+
+test('自定义数据库路径不修改已存在目录权限，数据库文件 0600', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-perm-'));
   const dir = path.join(root, 'nested');
   mkdirSync(dir, { recursive: true, mode: 0o755 });
@@ -101,7 +112,7 @@ test('文件数据库目录 0700、文件 0600', () => {
   const db = openDb(dbPath);
   initSchema(db);
 
-  assert.equal(statSync(dir).mode & 0o777, 0o700);
+  assert.equal(statSync(dir).mode & 0o777, 0o755);
   assert.equal(statSync(dbPath).mode & 0o777, 0o600);
   db.close();
 });
