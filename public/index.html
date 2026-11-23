@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Session Hub</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <h1>Session Hub</h1>
+      <nav id="agent-chips" class="chips" aria-label="按 Agent 筛选"></nav>
+      <input id="search" type="search" placeholder="搜索会话内容" autocomplete="off" aria-label="搜索会话内容">
+      <span id="status" class="status">加载中…</span>
+    </header>
+    <main class="layout">
+      <section class="list-pane">
+        <ul id="session-list" class="session-list"></ul>
+        <p id="list-empty" class="empty" hidden>没有匹配的会话</p>
+        <p id="list-error" class="error" hidden></p>
+      </section>
+      <section id="session-detail" class="detail-pane">
+        <p class="empty">从左侧选择一个会话</p>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
