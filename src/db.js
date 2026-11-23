@@ -1,18 +1,33 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, chmodSync } from 'node:fs';
+import path from 'node:path';
 
 const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
+const dbPaths = new WeakMap();
+
+function secureDbFiles(dbPath) {
+  if (!dbPath || dbPath === ':memory:') return;
+  mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+  try { chmodSync(path.dirname(dbPath), 0o700); } catch {}
+  for (const suffix of ['', '-wal', '-shm']) {
+    try { chmodSync(dbPath + suffix, 0o600); } catch {}
+  }
+}
 
 export function openDb(dbPath) {
+  secureDbFiles(dbPath);
   const db = new DatabaseSync(dbPath);
+  dbPaths.set(db, dbPath);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec('PRAGMA foreign_keys = ON');
+  secureDbFiles(dbPath);
   return db;
 }
 
 export function initSchema(db) {
   db.exec(schemaSql);
+  secureDbFiles(dbPaths.get(db));
 }
 
 function transaction(db, fn) {

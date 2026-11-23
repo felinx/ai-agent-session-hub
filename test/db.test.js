@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
   openDb, initSchema, replaceSession, getSyncState, hasSession, pruneMissing
 } from '../src/db.js';
@@ -86,5 +89,19 @@ test('超大工具结果可入库并读回', () => {
 
   const row = db.prepare('SELECT output FROM tool_results').get();
   assert.equal(row.output.length, big.length);
+  db.close();
+});
+
+test('文件数据库目录 0700、文件 0600', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'session-hub-perm-'));
+  const dir = path.join(root, 'nested');
+  mkdirSync(dir, { recursive: true, mode: 0o755 });
+  const dbPath = path.join(dir, 'hub.db');
+
+  const db = openDb(dbPath);
+  initSchema(db);
+
+  assert.equal(statSync(dir).mode & 0o777, 0o700);
+  assert.equal(statSync(dbPath).mode & 0o777, 0o600);
   db.close();
 });
