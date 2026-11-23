@@ -179,11 +179,23 @@ function toSession(row) {
   return { ...row, archived: !!row.archived };
 }
 
+// 默认隐藏的会话：没有消息的空会话，以及位于系统临时目录下的会话。
+// 用 cwd 前缀匹配 /tmp、/private/tmp 的子目录，但不误伤 /tmpfoo 这类路径。
+export const VISIBLE_SESSION_WHERE = `
+  message_count > 0
+  AND (cwd IS NULL OR (
+    cwd NOT IN ('/tmp', '/tmp/', '/private/tmp', '/private/tmp/')
+    AND cwd NOT LIKE '/tmp/%'
+    AND cwd NOT LIKE '/private/tmp/%'
+  ))
+`;
+
 export function listSessions(db, query = {}) {
-  const { agent, chat, cwd, q, since, limit = 500, includeArchived = true } = query;
+  const { agent, chat, cwd, q, since, limit = 500, includeArchived = true, includeHidden = false } = query;
   const where = [];
   const params = [];
 
+  if (!includeHidden) where.push(VISIBLE_SESSION_WHERE);
   if (agent) { where.push('agent = ?'); params.push(agent); }
   if (chat) { where.push('chat_id = ?'); params.push(chat); }
   if (cwd) { where.push('cwd = ?'); params.push(cwd); }
@@ -249,16 +261,19 @@ export function getSession(db, key) {
   return { session: toSession(row), messages };
 }
 
-export function getFacets(db) {
+export function getFacets(db, { includeHidden = false } = {}) {
+  const visible = includeHidden ? '1' : VISIBLE_SESSION_WHERE;
   return {
     agents: db.prepare(
-      'SELECT agent, count(*) AS count FROM sessions GROUP BY agent ORDER BY agent'
+      `SELECT agent, count(*) AS count FROM sessions WHERE ${visible} GROUP BY agent ORDER BY agent`
     ).all(),
     chats: db.prepare(
-      'SELECT chat_id AS chatId, count(*) AS count FROM sessions WHERE chat_id IS NOT NULL GROUP BY chat_id ORDER BY chat_id'
+      `SELECT chat_id AS chatId, count(*) AS count FROM sessions
+       WHERE chat_id IS NOT NULL AND ${visible} GROUP BY chat_id ORDER BY chat_id`
     ).all(),
     cwds: db.prepare(
-      'SELECT cwd, count(*) AS count FROM sessions WHERE cwd IS NOT NULL GROUP BY cwd ORDER BY count DESC, cwd'
+      `SELECT cwd, count(*) AS count FROM sessions
+       WHERE cwd IS NOT NULL AND ${visible} GROUP BY cwd ORDER BY count DESC, cwd`
     ).all()
   };
 }

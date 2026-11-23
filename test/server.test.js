@@ -29,10 +29,11 @@ function seed(db) {
   ], { mtimeMs: 200, size: 1 });
 }
 
-async function makeServer() {
+async function makeServer(extraSeed) {
   const db = openDb(':memory:');
   initSchema(db);
   seed(db);
+  extraSeed?.(db);
 
   const publicDir = mkdtempSync(path.join(tmpdir(), 'session-hub-public-'));
   writeFileSync(path.join(publicDir, 'index.html'), '<!doctype html><div id="app"></div>');
@@ -105,6 +106,34 @@ test('GET /api/health 报告状态', async (t) => {
   assert.equal(h.ok, true);
   assert.equal(h.sessions, 2);
   assert.equal(h.scanning, false);
+});
+
+test('默认隐藏空会话与临时目录，includeHidden=1 可包含', async (t) => {
+  const s = await makeServer((db) => {
+    const base = {
+      createdAt: 1, archived: 0, tokens: null, extraJson: null
+    };
+    replaceSession(db, {
+      ...base, key: 'claude:empty', agent: 'claude', nativeId: 'empty', title: '空会话',
+      cwd: '/p1', chatId: null, updatedAt: 900, sourcePath: '/x/empty.jsonl', messageCount: 0
+    }, [], { mtimeMs: 900, size: 1 });
+    replaceSession(db, {
+      ...base, key: 'claude:tmp', agent: 'claude', nativeId: 'tmp', title: '临时会话',
+      cwd: '/tmp', chatId: null, updatedAt: 800, sourcePath: '/x/tmp.jsonl', messageCount: 1
+    }, [{ role: 'user', text: '临时' }], { mtimeMs: 800, size: 1 });
+  });
+  t.after(() => s.close());
+
+  const body = await (await fetch(s.base + '/api/sessions')).json();
+  assert.deepEqual(body.sessions.map(x => x.key), ['claude:a', 'codex:b']);
+  assert.equal(body.facets.agents.find(a => a.agent === 'claude').count, 1);
+
+  const all = await (await fetch(s.base + '/api/sessions?includeHidden=1')).json();
+  assert.equal(all.sessions.length, 4);
+  assert.equal(all.facets.agents.find(a => a.agent === 'claude').count, 3);
+
+  const health = await (await fetch(s.base + '/api/health')).json();
+  assert.equal(health.sessions, 2);
 });
 
 test('拒绝非本机 Host 并附带安全响应头', async (t) => {

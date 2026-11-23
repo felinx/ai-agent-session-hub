@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { listSessions, getSession, getFacets } from './db.js';
+import { listSessions, getSession, getFacets, VISIBLE_SESSION_WHERE } from './db.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -42,7 +42,7 @@ function sendJson(res, status, body) {
 
 export function createServer({ db, state, publicDir }) {
   const rootDir = path.resolve(publicDir);
-  const countSessions = db.prepare('SELECT count(*) AS c FROM sessions');
+  const countSessions = db.prepare(`SELECT count(*) AS c FROM sessions WHERE ${VISIBLE_SESSION_WHERE}`);
 
   return http.createServer(async (req, res) => {
     try {
@@ -71,6 +71,7 @@ export function createServer({ db, state, publicDir }) {
         const params = url.searchParams;
         const rawLimit = Number(params.get('limit'));
         const rawSince = Number(params.get('since'));
+        const includeHidden = params.get('includeHidden') === '1';
         const sessions = listSessions(db, {
           agent: params.get('agent') || undefined,
           chat: params.get('chat') || undefined,
@@ -78,9 +79,10 @@ export function createServer({ db, state, publicDir }) {
           q: params.get('q') || undefined,
           since: Number.isFinite(rawSince) && rawSince > 0 ? rawSince : undefined,
           limit: Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 5000) : undefined,
-          includeArchived: params.get('archived') !== '0'
+          includeArchived: params.get('archived') !== '0',
+          includeHidden
         });
-        return sendJson(res, 200, { sessions, facets: getFacets(db) });
+        return sendJson(res, 200, { sessions, facets: getFacets(db, { includeHidden }) });
       }
 
       if (pathname === '/api/session') {

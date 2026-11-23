@@ -52,6 +52,8 @@ npm start -- --rebuild
 ## 功能
 
 - 按 Agent / 飞书 chat / 工作目录 / 更新时间筛选
+- 侧边栏支持「平铺」与「项目」两种组织方式：平铺按最近更新时间倒序；项目按工作目录分组，组间与组内均按最近更新倒序
+- 默认隐藏 0 条消息的空会话，以及 cwd 位于 `/tmp`、`/private/tmp`（含子目录）的临时会话；API 加 `includeHidden=1` 可查看
 - 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
 - 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）；消息、思考与工具内容按 Markdown 渲染，JSON 内容自动缩进格式化
 - 排除辅助会话：Codex 的 `onboarding_checklist`（首次引导清单）不出现在会话列表中

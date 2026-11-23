@@ -1,4 +1,5 @@
 import { renderMarkdown, formatMaybeJson } from './format.js';
+import { groupSessionsByProject } from './group.js';
 
 const state = {
   agent: 'all',
@@ -6,6 +7,7 @@ const state = {
   chat: '',
   cwd: '',
   since: '',
+  view: 'flat',
   selected: null,
   sessions: [],
   facets: { agents: [], chats: [], cwds: [] },
@@ -22,6 +24,7 @@ const statusEl = $('#status');
 const searchEl = $('#search');
 const chipsEl = $('#agent-chips');
 const filtersEl = $('#filters');
+const viewToggleEl = $('#view-toggle');
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -61,6 +64,7 @@ function writeHash() {
   if (state.chat) params.set('chat', state.chat);
   if (state.cwd) params.set('cwd', state.cwd);
   if (state.since) params.set('since', state.since);
+  if (state.view === 'projects') params.set('view', 'projects');
   if (state.selected) params.set('session', state.selected);
   const next = params.toString();
   const target = next ? `#${next}` : location.pathname;
@@ -74,6 +78,7 @@ function readHash() {
   state.chat = params.get('chat') || '';
   state.cwd = params.get('cwd') || '';
   state.since = params.get('since') || '';
+  state.view = params.get('view') === 'projects' ? 'projects' : 'flat';
   state.selected = params.get('session') || null;
   searchEl.value = state.q;
 }
@@ -143,34 +148,79 @@ function renderFilters() {
   );
 }
 
+const VIEWS = [
+  ['flat', '平铺'],
+  ['projects', '项目']
+];
+
+function renderViewToggle() {
+  viewToggleEl.replaceChildren(...VIEWS.map(([value, label]) => {
+    const active = state.view === value;
+    return el('button', {
+      class: `view-btn${active ? ' active' : ''}`,
+      type: 'button',
+      'aria-pressed': String(active),
+      onclick: () => {
+        if (state.view === value) return;
+        state.view = value;
+        writeHash();
+        renderList();
+      }
+    }, label);
+  }));
+}
+
+function sessionItem(session) {
+  return el('li', {
+    class: `session-item${state.selected === session.key ? ' active' : ''}`,
+    tabindex: '0',
+    role: 'button',
+    onclick: () => openSession(session.key),
+    onkeydown: (event) => {
+      if (event.key === 'Enter' || event.key === ' ') openSession(session.key);
+    }
+  }, [
+    el('div', { class: 'session-title-row' }, [
+      el('span', { class: `dot ${session.agent}` }),
+      el('strong', { class: 'session-title', text: session.title }),
+      el('span', { class: 'session-time', text: relativeTime(session.updatedAt) })
+    ]),
+    el('div', { class: 'session-meta' }, [
+      el('span', { class: 'badge', text: session.agent }),
+      el('span', { text: session.chatId || '本地会话' }),
+      el('span', { text: `${session.messageCount} 条消息` })
+    ]),
+    el('div', { class: 'session-cwd', text: session.cwd || '（无 cwd）' })
+  ]);
+}
+
+function projectLabel(cwd) {
+  if (!cwd) return '未归类';
+  const parts = cwd.split('/').filter(Boolean);
+  return parts.at(-1) || cwd;
+}
+
 function renderList() {
+  renderViewToggle();
   listEl.replaceChildren();
   emptyEl.hidden = state.sessions.length > 0;
 
-  for (const session of state.sessions) {
-    const item = el('li', {
-      class: `session-item${state.selected === session.key ? ' active' : ''}`,
-      tabindex: '0',
-      role: 'button',
-      onclick: () => openSession(session.key),
-      onkeydown: (event) => {
-        if (event.key === 'Enter' || event.key === ' ') openSession(session.key);
-      }
-    }, [
-      el('div', { class: 'session-title-row' }, [
-        el('span', { class: `dot ${session.agent}` }),
-        el('strong', { class: 'session-title', text: session.title }),
-        el('span', { class: 'session-time', text: relativeTime(session.updatedAt) })
-      ]),
-      el('div', { class: 'session-meta' }, [
-        el('span', { class: 'badge', text: session.agent }),
-        el('span', { text: session.chatId || '本地会话' }),
-        el('span', { text: `${session.messageCount} 条消息` })
-      ]),
-      el('div', { class: 'session-cwd', text: session.cwd || '（无 cwd）' })
-    ]);
-    listEl.append(item);
+  if (state.view === 'projects') {
+    for (const group of groupSessionsByProject(state.sessions)) {
+      listEl.append(el('li', { class: 'project-group' }, [
+        el('details', { class: 'project', open: '' }, [
+          el('summary', { class: 'project-head' }, [
+            el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) }),
+            el('span', { class: 'project-count', text: String(group.sessions.length) })
+          ]),
+          el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
+        ])
+      ]));
+    }
+    return;
   }
+
+  for (const session of state.sessions) listEl.append(sessionItem(session));
 }
 
 function statusLine(health) {

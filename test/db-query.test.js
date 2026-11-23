@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { openDb, initSchema, replaceSession } from '../src/db.js';
 import { listSessions, getSession, getFacets } from '../src/db.js';
 
-function session(key, agent, nativeId, chatId, cwd, updatedAt) {
+function session(key, agent, nativeId, chatId, cwd, updatedAt, messageCount = 2) {
   return {
     key, agent, nativeId, title: `title-${nativeId}`, cwd, chatId,
     createdAt: 1, updatedAt, sourcePath: `${cwd}/${agent}-${nativeId}.jsonl`,
-    archived: 0, messageCount: 2, tokens: null, extraJson: null
+    archived: 0, messageCount, tokens: null, extraJson: null
   };
 }
 
@@ -73,5 +73,34 @@ test('getFacets 统计三个维度', () => {
   assert.deepEqual(facets.chats.map(c => c.chatId).sort(), ['oc_A', 'oc_B']);
   const p1 = facets.cwds.find(c => c.cwd === '/p1');
   assert.equal(p1.count, 2);
+  db.close();
+});
+
+test('默认隐藏 0 消息会话与 /tmp 临时目录会话', () => {
+  const db = freshDb();
+  replaceSession(db, session('claude:empty', 'claude', 'empty', 'oc_E', '/p1', 900, 0), [], { mtimeMs: 900, size: 1 });
+  replaceSession(db, session('claude:tmp', 'claude', 'tmp', 'oc_T', '/tmp', 800), [{ role: 'user', text: 'x' }], { mtimeMs: 800, size: 1 });
+  replaceSession(db, session('claude:tmp-sub', 'claude', 'tmp-sub', 'oc_S', '/private/tmp/work', 700), [{ role: 'user', text: 'x' }], { mtimeMs: 700, size: 1 });
+  replaceSession(db, session('claude:tmpish', 'claude', 'tmpish', 'oc_I', '/tmpfoo', 600), [{ role: 'user', text: 'x' }], { mtimeMs: 600, size: 1 });
+
+  assert.deepEqual(
+    listSessions(db, {}).map(s => s.key),
+    ['claude:tmpish', 'claude:a', 'codex:b', 'dsh:c']
+  );
+  assert.deepEqual(
+    listSessions(db, { includeHidden: true }).map(s => s.key),
+    ['claude:empty', 'claude:tmp', 'claude:tmp-sub', 'claude:tmpish', 'claude:a', 'codex:b', 'dsh:c']
+  );
+
+  const facets = getFacets(db);
+  assert.equal(facets.agents.find(a => a.agent === 'claude').count, 2);
+  assert.deepEqual(facets.chats.map(c => c.chatId).sort(), ['oc_A', 'oc_B', 'oc_I']);
+  assert.equal(facets.cwds.some(c => c.cwd === '/tmp'), false);
+  assert.equal(facets.cwds.some(c => c.cwd === '/tmpfoo'), true);
+
+  assert.deepEqual(
+    listSessions(db, { includeHidden: true, agent: 'claude' }).length,
+    5
+  );
   db.close();
 });
