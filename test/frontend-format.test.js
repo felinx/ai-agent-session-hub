@@ -42,6 +42,12 @@ test('renderMarkdown 不把 javascript: 链接变成锚点', () => {
   assert.match(html, /\[坏\]/);
 });
 
+test('renderMarkdown 遇到不完整的代码围栏行不会卡死', () => {
+  const html = renderMarkdown('```js extra\n下一行');
+  assert.match(html, /```js extra/);
+  assert.match(html, /下一行/);
+});
+
 test('formatMaybeJson 格式化 JSON，非 JSON 返回 null', () => {
   assert.equal(formatMaybeJson('{"a":1}'), '{\n  "a": 1\n}');
   assert.equal(formatMaybeJson('[1,2]'), '[\n  1,\n  2\n]');

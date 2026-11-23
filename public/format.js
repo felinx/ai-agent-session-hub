@@ -111,6 +111,12 @@ export function renderMarkdown(input) {
       paragraph.push(renderInline(escapeHtml(lines[i])));
       i++;
     }
+    // 防御：以块语法开头但未被上面的分支消费的行（例如不完整的 ``` 围栏），
+    // 按普通段落处理，保证每轮至少前进一行，避免死循环撑爆数组。
+    if (paragraph.length === 0) {
+      paragraph.push(renderInline(escapeHtml(lines[i])));
+      i++;
+    }
     html.push(`<p>${paragraph.join('<br>')}</p>`);
   }
 
