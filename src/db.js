@@ -154,3 +154,96 @@ export function clearAll(db) {
     `);
   });
 }
+
+const SESSION_COLUMNS = `
+  key, agent, native_id AS nativeId, title, cwd, chat_id AS chatId,
+  created_at AS createdAt, updated_at AS updatedAt, source_path AS sourcePath,
+  archived, message_count AS messageCount, tokens, extra_json AS extraJson
+`;
+
+function toSession(row) {
+  return { ...row, archived: !!row.archived };
+}
+
+export function listSessions(db, query = {}) {
+  const { agent, chat, cwd, q, limit = 500, includeArchived = true } = query;
+  const where = [];
+  const params = [];
+
+  if (agent) { where.push('agent = ?'); params.push(agent); }
+  if (chat) { where.push('chat_id = ?'); params.push(chat); }
+  if (cwd) { where.push('cwd = ?'); params.push(cwd); }
+  if (!includeArchived) where.push('archived = 0');
+
+  if (q) {
+    if (q.length >= 3) {
+      const expr = '"' + q.replaceAll('"', '""') + '"';
+      where.push('key IN (SELECT session_key FROM messages_fts WHERE body MATCH ?)');
+      params.push(expr);
+    } else {
+      const escaped = q.replace(/[\\%_]/g, '\\$&');
+      const like = `%${escaped}%`;
+      where.push("key IN (SELECT session_key FROM messages WHERE text LIKE ? ESCAPE '\\' OR thinking LIKE ? ESCAPE '\\')");
+      params.push(like, like);
+    }
+  }
+
+  const sql = `
+    SELECT ${SESSION_COLUMNS} FROM sessions
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY updated_at DESC LIMIT ?
+  `;
+  params.push(limit);
+  return db.prepare(sql).all(...params).map(toSession);
+}
+
+export function getSession(db, key) {
+  const row = db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE key = ?`).get(key);
+  if (!row) return null;
+
+  const rows = db.prepare(
+    'SELECT seq, role, at, text, thinking FROM messages WHERE session_key = ? ORDER BY seq'
+  ).all(key);
+  const messages = rows.map(m => {
+    const message = { role: m.role, at: m.at, text: m.text ?? '', toolCalls: [], toolResults: [] };
+    if (m.thinking !== null) message.thinking = m.thinking;
+    return message;
+  });
+  const indexBySeq = new Map(rows.map((m, i) => [m.seq, i]));
+
+  for (const call of db.prepare(
+    'SELECT message_seq, call_id, name, input_json FROM tool_calls WHERE session_key = ? ORDER BY id'
+  ).all(key)) {
+    const i = indexBySeq.get(call.message_seq);
+    if (i === undefined) continue;
+    let input = null;
+    try { input = JSON.parse(call.input_json ?? 'null'); } catch {}
+    messages[i].toolCalls.push({ id: call.call_id, name: call.name, input });
+  }
+
+  for (const result of db.prepare(
+    'SELECT message_seq, call_id, output, is_error FROM tool_results WHERE session_key = ? ORDER BY id'
+  ).all(key)) {
+    const i = indexBySeq.get(result.message_seq);
+    if (i === undefined) continue;
+    messages[i].toolResults.push({
+      callId: result.call_id, output: result.output ?? '', isError: !!result.is_error
+    });
+  }
+
+  return { session: toSession(row), messages };
+}
+
+export function getFacets(db) {
+  return {
+    agents: db.prepare(
+      'SELECT agent, count(*) AS count FROM sessions GROUP BY agent ORDER BY agent'
+    ).all(),
+    chats: db.prepare(
+      'SELECT chat_id AS chatId, count(*) AS count FROM sessions WHERE chat_id IS NOT NULL GROUP BY chat_id ORDER BY chat_id'
+    ).all(),
+    cwds: db.prepare(
+      'SELECT cwd, count(*) AS count FROM sessions WHERE cwd IS NOT NULL GROUP BY cwd ORDER BY count DESC, cwd'
+    ).all()
+  };
+}
