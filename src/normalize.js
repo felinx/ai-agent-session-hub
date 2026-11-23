@@ -1,4 +1,4 @@
-const BRIDGE_CONTEXT_RE = /<bridge_context>[\s\S]*?<\/bridge_context>/g;
+const BRIDGE_CONTEXT_RE = /<bridge_(context|instructions)>[\s\S]*?<\/bridge_\1>/g;
 
 const SYNTHETIC_PREFIX_RE =
   /^<(environment_context|recommended_plugins|user_instructions|local-command-caveat|local-command-stdout|command-name)\b/;
@@ -15,7 +15,19 @@ export function textFromContent(content) {
 
 export function stripBridgeContext(text) {
   if (typeof text !== 'string') return '';
-  return text.replace(BRIDGE_CONTEXT_RE, '').trim();
+  const withoutMeta = text.replace(BRIDGE_CONTEXT_RE, '');
+
+  const userInput = withoutMeta.match(/<user_input>([\s\S]*?)<\/user_input>/);
+  if (userInput) {
+    const inner = userInput[1].trim();
+    try {
+      const parsed = JSON.parse(inner);
+      if (parsed && typeof parsed.text === 'string') return parsed.text.trim();
+    } catch {}
+    return inner;
+  }
+
+  return withoutMeta.trim();
 }
 
 export function isSyntheticUserText(text) {

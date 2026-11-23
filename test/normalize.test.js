@@ -15,6 +15,14 @@ test('textFromContent 拼接 text block', () => {
 test('stripBridgeContext 与合成文本识别', () => {
   const t = '<bridge_context>{"chatId":"oc_1"}</bridge_context>\n你好';
   assert.equal(stripBridgeContext(t), '你好');
+  const instructions = '<bridge_context>{}</bridge_context>\n<bridge_instructions>你在 bridge 中运行</bridge_instructions>\n';
+  assert.equal(stripBridgeContext(instructions), '');
+  assert.equal(deriveTitle(instructions, '未命名会话'), '未命名会话');
+
+  const wrapped = '<bridge_context>{}</bridge_context>\n<bridge_instructions>x</bridge_instructions>\n' +
+    '<user_input>\n{"text":"检查构建"}\n</user_input>';
+  assert.equal(stripBridgeContext(wrapped), '检查构建');
+  assert.equal(deriveTitle(wrapped), '检查构建');
   assert.equal(isSyntheticUserText('<environment_context>...</environment_context>'), true);
   assert.equal(isSyntheticUserText('<recommended_plugins>x</recommended_plugins>'), true);
   assert.equal(isSyntheticUserText('你好'), false);
