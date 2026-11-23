@@ -1,0 +1,5 @@
+{"type":"queue-operation","sessionId":"11111111-1111-4111-8111-111111111111","timestamp":"2026-11-01T00:00:00.000Z"}
+{"type":"user","sessionId":"11111111-1111-4111-8111-111111111111","cwd":"/tmp/proj","timestamp":"2026-11-01T00:00:01.000Z","message":{"role":"user","content":"帮我检查构建失败"}}
+{"type":"assistant","sessionId":"11111111-1111-4111-8111-111111111111","cwd":"/tmp/proj","timestamp":"2026-11-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"先看日志"},{"type":"text","text":"我看一下。"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","sessionId":"11111111-1111-4111-8111-111111111111","timestamp":"2026-11-01T00:00:03.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"a.txt"}]}}
+{"type":"attachment","timestamp":"2026-11-01T00:00:04.000Z"}
