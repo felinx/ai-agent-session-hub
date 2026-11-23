@@ -1,0 +1,2 @@
+{"type":"session_meta","payload":{"id":"44444444-4444-4444-8444-444444444444","cwd":"/Users/felinx/Documents/Codex/plugin","thread_source":"onboarding_checklist"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Inspect PRs, triage issues"}]}}

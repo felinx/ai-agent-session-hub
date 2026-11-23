@@ -37,6 +37,17 @@ test('discoverCodex 读取索引标题并排除子代理', async () => {
   assert.equal(files[0].titleHint, '检查构建');
 });
 
+test('discoverCodex 排除 onboarding_checklist 辅助会话', async () => {
+  const root = makeRoot({ withIndex: true });
+  copyFileSync(
+    path.join(FIXTURES, 'onboarding.jsonl'),
+    path.join(root, 'sessions', '2026', '11', '01', 'rollout-onboarding.jsonl')
+  );
+  const files = await discoverCodex({ roots: { codex: root } });
+  assert.equal(files.length, 1);
+  assert.equal(files[0].nativeId, '22222222-2222-4222-8222-222222222222');
+});
+
 test('缺失索引时回退首条真实用户文本', async () => {
   const root = makeRoot({ withIndex: false });
   const [file] = await discoverCodex({ roots: { codex: root } });

@@ -1,3 +1,5 @@
+import { renderMarkdown, formatMaybeJson } from './format.js';
+
 const state = {
   agent: 'all',
   q: '',
@@ -26,6 +28,7 @@ function el(tag, props = {}, children = []) {
   for (const [key, value] of Object.entries(props)) {
     if (key === 'class') node.className = value;
     else if (key === 'text') node.textContent = value;
+    else if (key === 'html') node.innerHTML = value;
     else if (key === 'dataset') Object.assign(node.dataset, value);
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
     else if (value !== undefined && value !== null) node.setAttribute(key, value);
@@ -220,26 +223,49 @@ function detailsBlock(summary, bodyNode) {
   return el('details', {}, [el('summary', { text: summary }), bodyNode]);
 }
 
+// renderMarkdown 先转义全部文本，只产出受控标签；这里注入的 HTML 不含未转义的用户输入。
+function markdownBlock(text, className) {
+  const html = renderMarkdown(text);
+  if (!html) return el('div', { class: className, text });
+  return el('div', { class: `${className} markdown`, html });
+}
+
+function jsonText(value) {
+  if (typeof value === 'string') return formatMaybeJson(value) ?? value;
+  if (value === undefined || value === null) return '（无参数）';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function renderToolResult(result) {
+  const pretty = typeof result.output === 'string' ? formatMaybeJson(result.output) : null;
+  if (pretty) return el('pre', { class: 'tool', text: pretty });
+  return markdownBlock(result.output ?? '', 'tool-output');
+}
+
 function renderMessage(message) {
   const role = message.role === 'user' ? '用户' : message.role === 'assistant' ? 'Agent' : message.role;
   const body = el('div', { class: 'message-body' });
 
   if (message.thinking) {
-    body.append(detailsBlock('思考', el('pre', { class: 'thinking', text: message.thinking })));
+    body.append(detailsBlock('思考', markdownBlock(message.thinking, 'thinking')));
   }
   if (message.text) {
-    body.append(el('div', { class: 'message-text', text: message.text }));
+    body.append(markdownBlock(message.text, 'message-text'));
   }
   for (const call of message.toolCalls ?? []) {
     body.append(detailsBlock(
       `工具调用 · ${call.name ?? 'unknown'}`,
-      el('pre', { class: 'tool', text: JSON.stringify(call.input, null, 2) })
+      el('pre', { class: 'tool', text: jsonText(call.input) })
     ));
   }
   for (const result of message.toolResults ?? []) {
     body.append(detailsBlock(
       `工具结果${result.isError ? ' · 错误' : ''}`,
-      el('pre', { class: 'tool', text: result.output })
+      renderToolResult(result)
     ));
   }
 

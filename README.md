@@ -53,7 +53,8 @@ npm start -- --rebuild
 
 - 按 Agent / 飞书 chat / 工作目录 / 更新时间筛选
 - 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
-- 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）
+- 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）；消息、思考与工具内容按 Markdown 渲染，JSON 内容自动缩进格式化
+- 排除辅助会话：Codex 的 `onboarding_checklist`（首次引导清单）不出现在会话列表中
 - 每 5 秒自动刷新会话列表，详情随会话内容变化刷新
 - 过滤条件与选中会话记录在 URL hash，刷新后保留
 
@@ -62,7 +63,7 @@ npm start -- --rebuild
 | 来源 | 位置 | 说明 |
 | --- | --- | --- |
 | Claude | `~/.claude/projects/<项目>/<uuid>.jsonl` | 只取顶层 UUID 会话文件；忽略 `agent-*.jsonl` 子代理记录；标题优先读 `custom-title.json` |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`、`~/.codex/archived_sessions/*.jsonl` | 排除 `parent_thread_id` / `forked_from_id` / `agent_path` 的子代理与 fork；标题取 `session_index.jsonl` 的 `thread_name` |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`、`~/.codex/archived_sessions/*.jsonl` | 排除 `parent_thread_id` / `forked_from_id` / `agent_path` 的子代理与 fork，以及 `thread_source: onboarding_checklist` 的引导辅助会话；标题取 `session_index.jsonl` 的 `thread_name` |
 | dsh | `~/.dsh/sessions/<slug>/<sessionDir>/session.v4.jsonl.zstd` | zstd 压缩的 v4 事件流；`lark-oc_*` 目录名映射回飞书 chat |
 | chat 映射 | `~/.lark-channel/profiles/{claude,codex}/sessions.json.catalog.json` | `scopeId` 即 chat id；dsh 从目录名提取 |
 

@@ -63,6 +63,7 @@ async function toDiscovered(sourcePath, archived, titles) {
   } catch {}
 
   if (meta.parent_thread_id || meta.forked_from_id || meta.agent_path) return null;
+  if (meta.thread_source === 'onboarding_checklist') return null;
 
   let stats;
   try {
