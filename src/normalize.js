@@ -1,0 +1,48 @@
+const BRIDGE_CONTEXT_RE = /<bridge_context>[\s\S]*?<\/bridge_context>/g;
+
+const SYNTHETIC_PREFIX_RE =
+  /^<(environment_context|recommended_plugins|user_instructions|local-command-caveat|local-command-stdout|command-name)\b/;
+
+export function textFromContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(block => block && (block.type === 'text' || block.type === 'input_text' || block.type === 'output_text'))
+    .map(block => block.text ?? '')
+    .filter(text => text !== '')
+    .join('\n');
+}
+
+export function stripBridgeContext(text) {
+  if (typeof text !== 'string') return '';
+  return text.replace(BRIDGE_CONTEXT_RE, '').trim();
+}
+
+export function isSyntheticUserText(text) {
+  if (typeof text !== 'string') return false;
+  return SYNTHETIC_PREFIX_RE.test(text.replace(/^﻿/, '').trim());
+}
+
+export function truncate(text, n) {
+  if (typeof text !== 'string') return '';
+  return text.slice(0, n);
+}
+
+export function deriveTitle(text, fallback = '未命名会话') {
+  const stripped = stripBridgeContext(text);
+  const line = stripped.split('\n').map(l => l.trim()).find(l => l !== '') ?? '';
+  return line ? truncate(line, 80) : fallback;
+}
+
+export function toEpochMs(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
