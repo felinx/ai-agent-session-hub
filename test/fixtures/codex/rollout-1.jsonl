@@ -1,0 +1,6 @@
+{"type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","cwd":"/tmp/codex","timestamp":"2026-11-01T00:00:00.000Z"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"检查构建失败"}]}}
+{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"先看日志"}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"我看一下。"}]}}
+{"type":"response_item","payload":{"type":"function_call","id":"fc_toolu_1","call_id":"toolu_1","name":"shell","arguments":"{\"cmd\":\"ls\"}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"toolu_1","output":"a.txt"}}
