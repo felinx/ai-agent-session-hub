@@ -4,6 +4,7 @@ import { loadConfig } from './config.js';
 import { startHub, defaultPublicDir } from './hub.js';
 import { createLogStore } from './log-file.js';
 import { collectStatus, formatStatus } from './status.js';
+import { startDaemon, stopDaemon, writeDaemonFile, removeDaemonFile } from './daemon.js';
 import { stamp } from './log.js';
 import { resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
 
@@ -72,6 +73,12 @@ async function runCommand(options, io) {
     return 1;
   }
 
+  if (quiet) {
+    // The detached child owns the pid file for exactly as long as it is serving.
+    writeDaemonFile(config.pidPath, { pid: process.pid, port: hub.port, startedAt: Date.now() });
+    process.once('exit', () => removeDaemonFile(config.pidPath, process.pid));
+  }
+
   if (io.noWait) return 0;
 
   await new Promise(resolve => {
@@ -99,6 +106,48 @@ async function statusCommand(options, io) {
   return status.running ? 0 : 1;
 }
 
+async function startCommand(options, io) {
+  const config = loadConfig(io.env, options);
+  const start = io.startDaemon ?? startDaemon;
+
+  let result;
+  try {
+    result = await start({ config, env: io.env });
+  } catch (error) {
+    io.err(`session-hub: the hub failed to start: ${error?.message ?? error}`);
+    io.err(`Check the log files in ${config.logDir}`);
+    return 1;
+  }
+
+  if (result.alreadyRunning) {
+    io.out(`Hub is already running (pid ${result.info.pid}) → http://${config.host}:${result.info.port}`);
+    return 0;
+  }
+  io.out(`Hub started in the background (pid ${result.info.pid}) → http://${config.host}:${result.info.port}`);
+  io.out(`Logs: ${config.logDir}`);
+  return 0;
+}
+
+async function stopCommand(options, io) {
+  const config = loadConfig(io.env, options);
+  const result = await (io.stopDaemon ?? stopDaemon)({ pidPath: config.pidPath });
+
+  if (result.stopped) {
+    io.out(`Hub stopped${result.forced ? ' (forced)' : ''} (pid ${result.info.pid})`);
+  } else if (result.stale) {
+    io.out('Hub is not running (removed a stale pid file)');
+  } else {
+    io.out('Hub is not running');
+  }
+  return 0;
+}
+
+async function restartCommand(options, io) {
+  const stopped = await stopCommand(options, io);
+  if (stopped !== 0) return stopped;
+  return startCommand(options, io);
+}
+
 export async function main(argv = process.argv.slice(2), io = {}) {
   const env = io.env ?? process.env;
   const out = io.out ?? ((line) => console.log(line));
@@ -122,6 +171,12 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       return 0;
     case 'run':
       return runCommand(options, context);
+    case 'start':
+      return startCommand(options, context);
+    case 'stop':
+      return stopCommand(options, context);
+    case 'restart':
+      return restartCommand(options, context);
     case 'status':
       return statusCommand(options, context);
     default:
