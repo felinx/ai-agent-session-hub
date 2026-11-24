@@ -41,7 +41,7 @@ const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
 const BINARY_SAMPLE_BYTES = 8192;
 
-// 文件查看器只读取常规文本文件（超过 1MB 截断），二进制内容不返回正文。
+// The file viewer only reads regular text files (truncated past 1 MB); binary content is never returned.
 async function readLocalFile(target) {
   try {
     const real = await realpath(target);
@@ -70,8 +70,8 @@ async function readLocalFile(target) {
   }
 }
 
-// 只读取会话 cwd 内的图片文件：解析真实路径后仍必须位于 cwd 内，
-// 这样 ../、绝对路径和符号链接都无法逃逸到目录之外。
+// Only serve image files inside the session cwd: the resolved real path must still sit
+// inside the cwd, so `..`, absolute paths, and symlinks cannot escape it.
 async function readSessionAsset(cwd, requested) {
   if (!ASSET_MIME[path.extname(requested).toLowerCase()]) return null;
   try {
@@ -166,7 +166,8 @@ export function createServer({
     return sendJson(res, status, { error: t(lang, key, params), code: key });
   }
 
-  // 给首页引用到的静态资源追加内容哈希，文件一改地址就变，绕过浏览器和 favicon 缓存。
+  // Append a content hash to static assets referenced by the HTML pages, so editing a file
+  // changes its URL and bypasses browser and favicon caches.
   const versionCache = new Map();
 
   async function assetVersion(ref) {

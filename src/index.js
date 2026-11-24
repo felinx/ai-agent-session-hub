@@ -30,7 +30,8 @@ function currentLanguage() {
 let syncing = false;
 let forceNext = config.rebuild;
 let lastQuietLogAt = 0;
-// 静默同步每 5 秒一次，只在有变化或有告警时打明细；无变化时最多每 5 分钟留一行心跳。
+// Syncs run every 5 seconds. Detail lines are printed on every change or warning;
+// when nothing changes only a heartbeat at most once every 5 minutes.
 const QUIET_LOG_INTERVAL_MS = 5 * 60_000;
 
 async function runSync() {

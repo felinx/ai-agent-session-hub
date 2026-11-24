@@ -21,7 +21,7 @@ export function isLocalFilePath(href) {
   return true;
 }
 
-// 本地文件链接改走只读查看页；行号片段（#L58-L62）原样保留给查看页高亮。
+// Local file links open the read-only viewer; line fragments (#L58-L62) are kept for the viewer to highlight.
 export function viewerUrl(sessionKey, href) {
   if (!isLocalFilePath(href)) return null;
   const [filePart, fragment] = splitHref(String(href).trim());

@@ -1,5 +1,5 @@
-// 安全的前端渲染工具：先转义，再应用受控的 Markdown 子集。
-// 本模块不依赖浏览器 API，可直接被 Node 测试导入。
+// Safe frontend rendering helpers: escape first, then apply a controlled Markdown subset.
+// This module does not depend on browser APIs, so Node tests can import it directly.
 
 import { isLocalFilePath } from './links.js';
 
@@ -25,12 +25,13 @@ function renderInline(escaped) {
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
   text = text.replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (match, alt, src) => {
-    // 远程图片不直接 <img>：CSP 只允许同源图片，加载会被拦截并产生控制台报错，
-    // 还会把访问者的 IP 暴露给第三方；改为可点击的外链。
+    // Remote images are not rendered as <img>: the CSP only allows same-origin images, so loading
+    // would be blocked and spam the console, and it would leak the reader's IP to a third party.
     if (/^https?:\/\//i.test(src)) {
       return `<a class="image-external" href="${src}" target="_blank" rel="noopener noreferrer" title="${src}">${alt || src}</a>`;
     }
-    // 只接受 data:image 或无协议的本地路径；其余（javascript:、file: 等）保持原文。
+    // Accept only data:image or scheme-less local paths; anything else (javascript:, file:, ...)
+    // is left as literal text.
     if (!/^(?:data:image\/|[^:]*$)/i.test(src)) return match;
     return `<img class="message-image" data-image-src="${src}" alt="${alt}" loading="lazy">`;
   });
@@ -126,8 +127,9 @@ export function renderMarkdown(input) {
       paragraph.push(renderInline(escapeHtml(lines[i])));
       i++;
     }
-    // 防御：以块语法开头但未被上面的分支消费的行（例如不完整的 ``` 围栏），
-    // 按普通段落处理，保证每轮至少前进一行，避免死循环撑爆数组。
+    // Defensive: a line that starts like a block but was not consumed by the branches above
+    // (for example an unterminated ``` fence) falls through as a paragraph, guaranteeing that
+    // every iteration advances by at least one line instead of looping forever.
     if (paragraph.length === 0) {
       paragraph.push(renderInline(escapeHtml(lines[i])));
       i++;

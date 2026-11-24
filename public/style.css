@@ -644,7 +644,8 @@ details[open] > summary.detail-toggle .chevron {
   color: #727981;
 }
 
-/* 复制按钮不能放进 <summary>（交互元素嵌在 summary 里不可访问），改为绝对定位到标题行右侧。 */
+/* The copy button cannot live inside <summary> (interactive elements there are not accessible),
+   so it is absolutely positioned over the summary row instead. */
 .detail-block {
   position: relative;
 }
@@ -659,7 +660,7 @@ details[open] > summary.detail-toggle .chevron {
   right: 7px;
 }
 
-/* 未展开时不显示复制按钮，避免大量无内容可复制的按钮。 */
+/* Hide the copy button while the block is collapsed, so collapsed blocks do not show buttons with nothing to copy. */
 .detail-block:not([open]) > .detail-copy {
   display: none;
 }
@@ -788,7 +789,7 @@ details[open] > summary.detail-toggle .chevron {
   text-underline-offset: 2px;
 }
 
-/* 远程图片不自动加载（CSP 只放行同源图片），渲染成可点击的外部链接徽章。 */
+/* Remote images are not loaded automatically (the CSP only allows same-origin images); render them as a clickable external-link badge instead. */
 .markdown a.image-external {
   display: inline-flex;
   align-items: center;

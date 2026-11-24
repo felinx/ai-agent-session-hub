@@ -1,6 +1,6 @@
-// 按工作目录（项目）分组会话。组间按组内最近更新时间倒序，组内同样倒序；
-// 没有 cwd 的会话归入末尾的 null 分组。
-// WorkBuddy 系统生成的日期时间目录只影响分组，会话自身的 cwd 保留原始路径。
+// Group sessions by working directory (project). Groups and their sessions are sorted by
+// most recent update, both descending; sessions without a cwd land in a trailing null group.
+// WorkBuddy's generated date-time directories only affect grouping — the session keeps its real cwd.
 
 const WORKBUDDY_DEFAULT_PROJECT = 'workbuddy-default';
 const WORKBUDDY_SYSTEM_DIR_RE = /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/;

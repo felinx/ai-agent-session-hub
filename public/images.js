@@ -1,7 +1,8 @@
 const DIRECT_IMAGE_RE = /^(?:https?:\/\/|data:image\/)/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
-// 会话里的图片多为相对 cwd 的本地路径，浏览器无法直接读取；交给后端只读接口。
+// Most session images are local paths relative to the cwd, which the browser cannot read directly;
+// they are routed through the read-only backend endpoint instead.
 export function resolveImageSource(sessionKey, src) {
   const source = String(src ?? '').trim();
   if (!source) return null;

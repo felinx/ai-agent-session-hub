@@ -13,7 +13,8 @@ export function jumpButtonState({ scrollTop = 0, scrollHeight = 0, clientHeight 
   };
 }
 
-// 平滑滚动时长随距离增长，超长会话可能会等十几秒；超过两屏就直接定位。
+// Smooth scrolling scales with distance and can take over ten seconds in a long session;
+// jump instantly once the distance exceeds two viewport heights.
 export function jumpScrollBehavior({ from = 0, to = 0, clientHeight = 0 }) {
   const distance = Math.abs(to - from);
   const limit = Math.max(clientHeight, 0) * SMOOTH_SCROLL_VIEWPORTS;

@@ -179,8 +179,9 @@ function toSession(row) {
   return { ...row, archived: !!row.archived };
 }
 
-// 默认隐藏的会话：没有消息的空会话，以及位于系统临时目录下的会话。
-// 用 cwd 前缀匹配 /tmp、/private/tmp 的子目录，但不误伤 /tmpfoo 这类路径。
+// Sessions hidden by default: empty sessions with no messages, and sessions whose cwd
+// is inside a system temp directory. Prefix-match /tmp and /private/tmp children
+// without catching look-alike paths such as /tmpfoo.
 export function visibilityWhere({
   includeHidden = false,
   showEmpty = includeHidden,

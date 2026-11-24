@@ -1,4 +1,4 @@
-// 日志格式化：时间戳、耗时、会话变化摘要。保持无副作用，便于直接单测。
+// Log formatting: timestamps, durations, and sync change summaries. Side-effect free so it can be unit tested.
 
 import { t } from '../public/i18n.js';
 
@@ -37,7 +37,7 @@ const CHANGE_KEYS = {
   removed: 'log.changeRemoved'
 };
 
-// 一次同步的日志行：汇总一行 + 最多 limit 条会话变化明细。
+// Log lines for one sync: a summary line plus at most `limit` per-session change lines.
 export function describeSync(result, lang, { now = new Date(), elapsedMs = 0, limit = 8 } = {}) {
   const prefix = stamp(now);
   const byAgent = (result.byAgent ?? [])
