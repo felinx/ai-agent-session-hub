@@ -23,7 +23,13 @@ function listen(server, port, host) {
 // Runs the hub until the returned handle is closed: opens the local copy, serves the
 // UI and API, and syncs incrementally. `emit(line, level)` receives every log line so
 // the caller decides where it goes (terminal, log files, or silence in daemon mode).
-export async function startHub({ config, publicDir = defaultPublicDir, emit = () => {}, syncInterval = 5000 }) {
+export async function startHub({
+  config,
+  publicDir = defaultPublicDir,
+  emit = () => {},
+  syncInterval = 5000,
+  sync = syncOnce
+}) {
   const db = openDb(config.dbPath);
   initSchema(db);
 
@@ -36,36 +42,40 @@ export async function startHub({ config, publicDir = defaultPublicDir, emit = ()
     return resolveLanguage(getSettings(db).language, detectSystemLanguage());
   }
 
-  let syncing = false;
+  let syncPromise = null;
+  let closed = false;
   let forceNext = config.rebuild;
 
-  async function runSync() {
-    if (syncing) return;
-    syncing = true;
+  function runSync() {
+    if (closed || syncPromise) return syncPromise ?? Promise.resolve();
     state.scanning = true;
 
-    try {
-      const result = await syncOnce(db, config, { force: forceNext });
-      forceNext = false;
-      state.lastSyncAt = Date.now();
-      state.warnings = result.warnings;
+    syncPromise = (async () => {
+      try {
+        const result = await sync(db, config, { force: forceNext });
+        forceNext = false;
+        state.lastSyncAt = Date.now();
+        state.warnings = result.warnings;
 
-      const lang = currentLanguage();
-      for (const warning of result.warnings) {
-        emit(`${stamp()} ${formatWarning(lang, warning)}`, 'warn');
+        const lang = currentLanguage();
+        for (const warning of result.warnings) {
+          emit(`${stamp()} ${formatWarning(lang, warning)}`, 'warn');
+        }
+        // Only real changes produce output; the status page covers the overall picture.
+        for (const line of describeSync(result, lang)) {
+          emit(line);
+        }
+      } catch (error) {
+        const message = String(error?.message ?? error);
+        state.warnings = [{ code: 'syncFailed', params: { message } }];
+        emit(`${stamp()} ${formatWarning(currentLanguage(), state.warnings[0])}`, 'error');
+      } finally {
+        state.scanning = false;
+        syncPromise = null;
       }
-      // Only real changes produce output; the status page covers the overall picture.
-      for (const line of describeSync(result, lang)) {
-        emit(line);
-      }
-    } catch (error) {
-      const message = String(error?.message ?? error);
-      state.warnings = [{ code: 'syncFailed', params: { message } }];
-      emit(`${stamp()} ${formatWarning(currentLanguage(), state.warnings[0])}`, 'error');
-    } finally {
-      syncing = false;
-      state.scanning = false;
-    }
+    })();
+
+    return syncPromise;
   }
 
   try {
@@ -82,11 +92,12 @@ export async function startHub({ config, publicDir = defaultPublicDir, emit = ()
 
   const timer = setInterval(runSync, syncInterval);
 
-  let closed = false;
   async function close() {
     if (closed) return;
     closed = true;
     clearInterval(timer);
+    // Let a sync that already started finish before the database goes away.
+    if (syncPromise) await syncPromise;
     await new Promise(resolve => server.close(resolve));
     db.close();
   }

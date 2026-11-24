@@ -45,3 +45,24 @@ test('startHub serves the status API, logs startup, and closes cleanly', async (
     await hub.close();
   }
 });
+
+test('close waits for the sync in flight before closing the database', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-hub-'));
+  let finished = false;
+
+  const hub = await startHub({
+    config: testConfig(dir),
+    publicDir,
+    emit: () => {},
+    syncInterval: 60_000,
+    sync: async () => {
+      await new Promise(resolve => setTimeout(resolve, 120));
+      finished = true;
+      return { changes: [], warnings: [] };
+    }
+  });
+
+  await hub.close();
+  assert.equal(finished, true);
+  assert.throws(() => hub.db.prepare('SELECT 1').get());
+});
