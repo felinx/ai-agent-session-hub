@@ -1,104 +1,117 @@
 # Session Hub
 
-一个**只读**的本机看板，把你在飞书里用过的三类 AI Agent 会话聚合到同一个页面：
+English | [中文](README.zh.md)
 
-- 通过 [lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) 产生的 **Claude Code** 会话（claude profile）
-- 同一个 bridge 产生的 **Codex** 会话（codex profile）
-- 通过 [dsh-lark-channel](https://github.com/JunguangJiang/dsh-lark-channel) 产生的 **DeepSeek Harness (dsh)** 会话
+A **read-only** local dashboard that brings your AI agent sessions from Lark/Feishu and local WorkBuddy sessions together on one page:
 
-## 只读承诺
+- **Claude Code** sessions produced through [lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) (claude profile)
+- **Codex** sessions produced by the same bridge (codex profile)
+- **DeepSeek Harness (dsh)** sessions produced through [dsh-lark-channel](https://github.com/JunguangJiang/dsh-lark-channel)
+- Local **WorkBuddy** sessions (CodeBuddy-based, by Tencent) stored under `~/.workbuddy`
 
-本工具**不会修改、移动或删除任何源目录里的文件**，也不调用任何外部网络服务。
+## Read-only promise
 
-它只做三件事：
+This tool **never modifies, moves, or deletes files in any source directory**, and it makes no external network calls.
 
-1. 读取 `~/.claude`、`~/.codex`、`~/.dsh`、`~/.lark-channel` 下的会话文件；
-2. 把解析结果写进自己独立的 SQLite 数据库 `~/.session-hub/hub.db`（目录 0700，数据库文件 0600）；
-3. 在 `127.0.0.1` 上提供本地网页与 JSON API。
+It only does three things:
 
-源文件只被 `stat` 和读取；增量同步依据文件 `mtime` + `size` 判断是否变化。
+1. Reads session files under `~/.claude`, `~/.codex`, `~/.dsh`, `~/.workbuddy`, and `~/.lark-channel`;
+2. Writes parsed results into its own SQLite database at `~/.session-hub/hub.db` (directory mode 0700, database file mode 0600);
+3. Serves a local web UI and JSON API on `127.0.0.1`.
 
-## 前置条件
+Source files are only `stat`-ed and read. Incremental sync decides whether a file changed by its `mtime` + `size`.
 
-- Node.js **≥ 22.5**（使用内置 `node:sqlite` 与 `node:zlib` 的 zstd 支持，无第三方依赖）
-- 本机存在至少一个数据来源；缺失的来源只会产生警告，不影响其它来源。
+## Requirements
 
-## 使用
+- Node.js **≥ 22.5** (uses built-in `node:sqlite` and `node:zlib` zstd support; no third-party dependencies)
+- At least one data source on this machine. Missing sources only produce warnings and do not affect the others.
+
+## Usage
 
 ```bash
 npm start
 ```
 
-默认打开 <http://127.0.0.1:7317>。首次启动会立即同步一次，之后每 5 秒增量同步。
+Open <http://127.0.0.1:7317>. The first start syncs immediately, then syncs incrementally every 5 seconds.
 
-完全重建本地副本（只清空 `~/.session-hub/hub.db`，不碰源目录）：
+Rebuild the local copy completely (only clears `~/.session-hub/hub.db`; source directories are untouched):
 
 ```bash
 npm start -- --rebuild
 ```
 
-## 环境变量
+## Environment variables
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `SESSION_HUB_HOST` | `127.0.0.1` | 监听地址；非必要不要改成 `0.0.0.0` |
-| `SESSION_HUB_PORT` | `7317` | 监听端口 |
-| `SESSION_HUB_DB` | `~/.session-hub/hub.db` | 本地副本数据库路径 |
-| `CLAUDE_HOME` | `~/.claude` | Claude 数据根目录 |
-| `CODEX_HOME` | `~/.codex` | Codex 数据根目录 |
-| `DSH_HOME` | `~/.dsh` | dsh 数据根目录 |
-| `LARK_CHANNEL_HOME` | `~/.lark-channel` | bridge profile 与 chat 映射所在目录 |
+| `SESSION_HUB_HOST` | `127.0.0.1` | Listen address; do not change to `0.0.0.0` unless necessary |
+| `SESSION_HUB_PORT` | `7317` | Listen port |
+| `SESSION_HUB_DB` | `~/.session-hub/hub.db` | Path to the local copy database |
+| `CLAUDE_HOME` | `~/.claude` | Claude data root |
+| `CODEX_HOME` | `~/.codex` | Codex data root |
+| `DSH_HOME` | `~/.dsh` | dsh data root |
+| `WORKBUDDY_HOME` | `~/.workbuddy` | WorkBuddy data root |
+| `LARK_CHANNEL_HOME` | `~/.lark-channel` | Directory containing bridge profiles and chat mappings |
 
-## 功能
+## Features
 
-- 按 Agent / 更新时间筛选
-- 侧边栏同时展示「项目」与「最近」两个可折叠区块：项目按工作目录分组（组间与组内均按最近更新倒序），最近为全部会话倒序；每个会话只显示标题、Agent 与时间
-- 项目默认全部收起；「项目」「最近」区块与每个项目的展开/收起状态保存在浏览器 localStorage，刷新页面或下次打开时保持
-- 默认隐藏 0 条消息的空会话，以及 cwd 位于 `/tmp`、`/private/tmp`（含子目录）的临时会话；API 加 `includeHidden=1` 可查看
-- 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
-- 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）；消息、思考与工具内容按 Markdown 渲染，JSON 内容自动缩进格式化
-- 每条消息，以及消息内的思考、工具调用、工具结果都提供一键复制按钮（复制原始文本，不复制渲染后的 HTML）
-- 排除辅助会话：Codex 的 `onboarding_checklist`（首次引导清单）不出现在会话列表中
-- 每 5 秒自动刷新会话列表，详情随会话内容变化刷新
-- 过滤条件与选中会话记录在 URL hash，刷新后保留
+- Filter by agent and last-updated time
+- The sidebar shows two collapsible sections, **Projects** and **Recent**. Projects are grouped by working directory (groups and sessions sorted by most recent update); Recent lists all sessions in reverse chronological order. Each session shows only its title, agent, and time
+- All projects start collapsed. The open/closed state of the **Projects** and **Recent** sections and of each project is stored in browser localStorage, so it survives reloads and future visits
+- Sessions with 0 messages and temporary sessions whose cwd is under `/tmp` or `/private/tmp` (including subdirectories) are hidden by default; pass `includeHidden=1` to the API to see them
+- A **Settings** page at the bottom of the sidebar lets you toggle empty and temporary sessions independently, enable or disable supported agents, switch the interface language, and inspect the local database and source directories. Disabling an agent stops syncing and removes its local copy; re-enabling it reads the source files again
+- The interface and all error messages are available in **Chinese and English**. The language follows your system/browser language by default; you can override it in **Settings → Interface language** (System / 中文 / English)
+- Full-text search (SQLite FTS5 trigram; automatically falls back to `LIKE` for queries shorter than 3 characters)
+- Session detail: message order, thinking, tool calls, and tool results (collapsible). Messages, thinking, and tool content are rendered as Markdown, with automatic JSON indentation/formatting
+- One-click copy buttons on every message and on each thinking, tool-call, and tool-result block (copies the original text, not the rendered HTML)
+- Auxiliary sessions are excluded: Codex `onboarding_checklist` sessions do not appear in the session list
+- WorkBuddy reasoning, tool calls, tool results, and AI titles are parsed; internal data such as `isMeta`, context compaction, `skipRun`, and aborted records is filtered out
+- The session list refreshes automatically every 5 seconds, and the open detail view follows content changes
+- Filters and the selected session are stored in the URL hash, so they survive a reload
 
-## 数据来源与解析规则（摘要）
+## Data sources and parsing rules (summary)
 
-| 来源 | 位置 | 说明 |
+| Source | Location | Notes |
 | --- | --- | --- |
-| Claude | `~/.claude/projects/<项目>/<uuid>.jsonl` | 只取顶层 UUID 会话文件；忽略 `agent-*.jsonl` 子代理记录；标题优先读 `custom-title.json` |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`、`~/.codex/archived_sessions/*.jsonl` | 排除 `parent_thread_id` / `forked_from_id` / `agent_path` 的子代理与 fork，以及 `thread_source: onboarding_checklist` 的引导辅助会话；标题取 `session_index.jsonl` 的 `thread_name` |
-| dsh | `~/.dsh/sessions/<slug>/<sessionDir>/session.v4.jsonl.zstd` | zstd 压缩的 v4 事件流；`lark-oc_*` 目录名映射回飞书 chat |
-| chat 映射 | `~/.lark-channel/profiles/{claude,codex}/sessions.json.catalog.json` | `scopeId` 即 chat id；dsh 从目录名提取 |
+| Claude | `~/.claude/projects/<project>/<uuid>.jsonl` | Only top-level UUID session files; ignores `agent-*.jsonl` subagent records; title prefers `custom-title.json` |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, `~/.codex/archived_sessions/*.jsonl` | Excludes subagents and forks identified by `parent_thread_id` / `forked_from_id` / `agent_path`, plus `thread_source: onboarding_checklist` auxiliary sessions; title comes from `thread_name` in `session_index.jsonl` |
+| dsh | `~/.dsh/sessions/<slug>/<sessionDir>/session.v4.jsonl.zstd` | zstd-compressed v4 event stream; `lark-oc_*` directory names map back to Lark chats |
+| WorkBuddy | `~/.workbuddy/projects/<project>/<uuid>.jsonl` | Streamed line by line; reasoning, tool calls, and results are grouped by `providerData.messageId`; `<system-reminder>` / `<user_query>` wrappers are removed; title comes from `ai-title`, falling back to the first user message; cwd comes from record fields rather than the directory name; system-generated directories such as `2026-10-02-11-25-23` are grouped under the virtual `workbuddy-default` project in the sidebar, while session details still show the original path |
+| Chat mapping | `~/.lark-channel/profiles/{claude,codex}/sessions.json.catalog.json` | `scopeId` is the chat id; dsh derives it from directory names; WorkBuddy is a local app and is not linked to Lark chats |
 
-## 隐私与安全
+> WorkBuddy's session format is not publicly documented, so fields may change after an upgrade. The parser skips malformed lines and unknown records. A single very large WorkBuddy session will be noticeably slower on first sync and first open.
 
-- 会话内容可能包含代码、路径、密钥、个人对话。**不要**把本服务暴露到公网或转发给他人。
-- 服务只绑定 `127.0.0.1`，没有登录鉴权，依靠本机访问控制。
-- 所有响应带 `Cache-Control: no-store`；静态文件路径做了穿越防护。
-- 本地副本数据库目录权限 `0700`、数据库及 WAL/SHM 文件 `0600`。
+## Privacy and security
 
-## 测试
+- Session content may contain code, paths, secrets, and personal conversations. **Do not** expose this service to the public internet or forward it to others.
+- The service binds only to `127.0.0.1` and has no authentication; it relies on local access control.
+- All responses use `Cache-Control: no-store`; static file paths are protected against traversal.
+- The local copy database directory uses mode `0700`; the database and its WAL/SHM files use `0600`.
+
+## Tests
 
 ```bash
 npm test
 ```
 
-## 结构
+## Layout
 
 ```
 src/
-  config.js          环境变量与默认路径
-  db.js              SQLite schema、会话写入、查询、清理、FTS
-  normalize.js       文本/时间归一化
-  sync.js            增量同步编排
-  server.js          HTTP API + 静态文件
-  index.js           入口与后台同步
+  config.js          Environment variables and default paths
+  db.js              SQLite schema, session writes, queries, pruning, FTS
+  settings.js        Read, validate, and persist local settings
+  normalize.js       Text/time normalization
+  sync.js            Incremental sync orchestration
+  server.js          HTTP API + static files
+  index.js           Entry point and background sync
   sources/
-    claude.js        Claude 会话发现与解析
-    codex.js         Codex rollout 发现与解析
-    dsh.js           dsh zstd 会话发现与解析
-    larkMap.js       飞书 chat 映射
-public/              前端看板
-  icons/             三个 Agent 的图标
+    claude.js        Claude session discovery and parsing
+    codex.js         Codex rollout discovery and parsing
+    dsh.js           dsh zstd session discovery and parsing
+    workbuddy.js     WorkBuddy JSONL session discovery and parsing
+    larkMap.js       Lark chat mapping
+public/              Frontend dashboard
+  i18n.js            Shared Chinese/English message catalog
+  icons/             Icons for the four agents
 ```
