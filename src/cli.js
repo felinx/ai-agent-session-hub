@@ -5,6 +5,8 @@ import { startHub, defaultPublicDir } from './hub.js';
 import { createLogStore } from './log-file.js';
 import { collectStatus, formatStatus } from './status.js';
 import { startDaemon, stopDaemon, writeDaemonFile, removeDaemonFile } from './daemon.js';
+import { tailLines, clearLogs, followLogs } from './logs.js';
+import { runDoctor, formatChecks } from './doctor.js';
 import { stamp } from './log.js';
 import { resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
 
@@ -148,6 +150,46 @@ async function restartCommand(options, io) {
   return startCommand(options, io);
 }
 
+async function logsCommand(options, io) {
+  const config = loadConfig(io.env, options);
+
+  if (options.clear) {
+    const count = (io.clearLogs ?? clearLogs)(config.logDir);
+    io.out(count > 0
+      ? `Cleared ${count} log file(s) in ${config.logDir}`
+      : `No log files in ${config.logDir}`);
+    return 0;
+  }
+
+  const lines = (io.tailLines ?? tailLines)(config.logDir, options.lines ?? 50);
+  if (lines.length === 0) {
+    io.out(`No log files in ${config.logDir}`);
+    return 0;
+  }
+  for (const line of lines) io.out(line);
+
+  if (options.follow) {
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    try {
+      await followLogs(config.logDir, { out: io.out, signal: controller.signal });
+    } finally {
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+    }
+  }
+  return 0;
+}
+
+async function doctorCommand(options, io) {
+  const config = loadConfig(io.env, options);
+  const checks = await (io.runDoctor ?? runDoctor)({ config });
+  io.out(formatChecks(checks));
+  return checks.some(check => check.level === 'fail') ? 1 : 0;
+}
+
 export async function main(argv = process.argv.slice(2), io = {}) {
   const env = io.env ?? process.env;
   const out = io.out ?? ((line) => console.log(line));
@@ -179,6 +221,10 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       return restartCommand(options, context);
     case 'status':
       return statusCommand(options, context);
+    case 'logs':
+      return logsCommand(options, context);
+    case 'doctor':
+      return doctorCommand(options, context);
     default:
       err(`session-hub: command "${command}" is not implemented yet`);
       return 1;

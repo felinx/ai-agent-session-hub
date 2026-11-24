@@ -25,9 +25,13 @@ const SPECS = {
     '--follow': { key: 'follow', value: 'flag' },
     '-n': { key: 'lines', value: 'lines' },
     '--lines': { key: 'lines', value: 'lines' },
-    '--clear': { key: 'clear', value: 'flag' }
+    '--clear': { key: 'clear', value: 'flag' },
+    '--db': SERVER_FLAGS['--db']
   },
-  doctor: {},
+  doctor: {
+    '--db': SERVER_FLAGS['--db'],
+    '--port': SERVER_FLAGS['--port']
+  },
   help: {},
   version: {}
 };

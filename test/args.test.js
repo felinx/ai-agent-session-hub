@@ -71,3 +71,12 @@ test('rejects missing and invalid values', () => {
   assert.deepEqual(parseArgs(['run', '--port', 'abc']).errors, [{ code: 'invalidPort', arg: 'abc' }]);
   assert.deepEqual(parseArgs(['logs', '-n', '0']).errors, [{ code: 'invalidLines', arg: '0' }]);
 });
+
+test('logs and doctor accept a database override', () => {
+  assert.deepEqual(parseArgs(['logs', '--db', '/tmp/x.db', '-n', '5']), {
+    command: 'logs', options: { db: '/tmp/x.db', lines: 5 }, errors: []
+  });
+  assert.deepEqual(parseArgs(['doctor', '--db', '/tmp/x.db', '--port', '8080']), {
+    command: 'doctor', options: { db: '/tmp/x.db', port: 8080 }, errors: []
+  });
+});
