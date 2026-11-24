@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/logo-banner-light.svg" alt="Agent Session Hub" width="720">
+</p>
+
 # Agent Session Hub
 
 English | [中文](README.zh.md)
@@ -160,6 +164,7 @@ public/              Frontend dashboard
   app.js             Session list, detail, settings, status
   viewer.html/.js    Read-only file viewer with line numbers
   icons/             Agent icons
+  logo-banner-light.svg  Banner shown at the top of this README
 ```
 
 ## License

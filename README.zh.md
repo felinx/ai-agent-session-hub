@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/logo-banner-light.svg" alt="Agent Session Hub" width="720">
+</p>
+
 # Agent Session Hub
 
 [English](README.md) | 中文
@@ -160,6 +164,7 @@ public/              前端看板
   app.js             会话列表、详情、设置、状态
   viewer.html/.js    只读文件查看器（带行号）
   icons/             Agent 图标
+  logo-banner-light.svg  README 顶部横幅
 ```
 
 ## 许可证
