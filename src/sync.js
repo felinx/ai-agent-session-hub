@@ -2,13 +2,16 @@ import { stat } from 'node:fs/promises';
 import { discoverClaude, parseClaude } from './sources/claude.js';
 import { discoverCodex, parseCodex } from './sources/codex.js';
 import { discoverDsh, parseDsh } from './sources/dsh.js';
+import { discoverWorkbuddy, parseWorkbuddy } from './sources/workbuddy.js';
 import { buildChatMap } from './sources/larkMap.js';
 import { getSyncState, hasSession, replaceSession, pruneMissing } from './db.js';
+import { getSettings } from './settings.js';
 
 const SOURCES = [
   { agent: 'claude', discover: discoverClaude, parse: parseClaude },
   { agent: 'codex', discover: discoverCodex, parse: parseCodex },
-  { agent: 'dsh', discover: discoverDsh, parse: parseDsh }
+  { agent: 'dsh', discover: discoverDsh, parse: parseDsh },
+  { agent: 'workbuddy', discover: discoverWorkbuddy, parse: parseWorkbuddy }
 ];
 
 function getSessionMeta(db, sourcePath) {
@@ -17,24 +20,42 @@ function getSessionMeta(db, sourcePath) {
   ).get(sourcePath) ?? null;
 }
 
+function resetLegacyNormalizedWorkbuddySessions(db) {
+  db.prepare(`
+    DELETE FROM sync_state
+    WHERE source_path IN (
+      SELECT source_path FROM sessions
+      WHERE agent = 'workbuddy' AND cwd = 'workbuddy-default'
+    )
+  `).run();
+}
+
 export async function syncOnce(db, config, opts = {}) {
   const chatMap = opts.chatMap ?? await buildChatMap(config);
   const force = !!opts.force;
   const warnings = [];
   const discovered = [];
+  const settings = opts.settings ?? getSettings(db);
+  const enabledAgents = new Set(settings.enabledAgents);
+  const sources = SOURCES.filter(source => enabledAgents.has(source.agent));
 
-  const results = await Promise.all(SOURCES.map(async source => {
+  resetLegacyNormalizedWorkbuddySessions(db);
+
+  const results = await Promise.all(sources.map(async source => {
     const root = config.roots[source.agent];
     try {
       await stat(root);
     } catch {
-      warnings.push(`来源根目录不可用：${root}`);
+      warnings.push({ code: 'sourceRootUnavailable', params: { path: String(root) } });
       return { ok: false, files: [] };
     }
     try {
       return { ok: true, files: await source.discover(config) };
     } catch (err) {
-      warnings.push(`来源扫描失败：${root}（${err?.message ?? err}）`);
+      warnings.push({
+        code: 'sourceScanFailed',
+        params: { path: String(root), message: String(err?.message ?? err) }
+      });
       return { ok: false, files: [] };
     }
   }));
@@ -44,8 +65,8 @@ export async function syncOnce(db, config, opts = {}) {
   let unchanged = 0;
   let removed = 0;
 
-  for (let i = 0; i < SOURCES.length; i++) {
-    const source = SOURCES[i];
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
     for (const file of results[i].files) {
       discovered.push(file);
 
@@ -66,7 +87,10 @@ export async function syncOnce(db, config, opts = {}) {
       try {
         parsed = await source.parse(file.sourcePath, file);
       } catch (err) {
-        warnings.push(`解析失败：${file.sourcePath}（${err?.message ?? err}）`);
+        warnings.push({
+          code: 'parseFailed',
+          params: { path: file.sourcePath, message: String(err?.message ?? err) }
+        });
         continue;
       }
 

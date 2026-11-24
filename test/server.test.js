@@ -42,12 +42,20 @@ async function makeServer(extraSeed, extraFiles = {}) {
   }
 
   const state = { scanning: false, lastSyncAt: null, warnings: [] };
-  const server = createServer({ db, state, publicDir });
+  const config = {
+    dbPath: '/tmp/session-hub-test/hub.db',
+    roots: {
+      claude: '/data/claude', codex: '/data/codex', dsh: '/data/dsh',
+      workbuddy: '/data/workbuddy', larkChannel: '/data/lark'
+    }
+  };
+  const server = createServer({ db, state, publicDir, config });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
 
   return {
     base: `http://127.0.0.1:${port}`,
+    state,
     close: () => new Promise(resolve => server.close(() => { db.close(); resolve(); }))
   };
 }
@@ -61,6 +69,14 @@ function rawGet(hostname, port, path, headers = {}) {
     });
     req.on('error', reject);
     req.end();
+  });
+}
+
+function putJson(url, body, headers = {}) {
+  return fetch(url, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body)
   });
 }
 
@@ -109,6 +125,141 @@ test('GET /api/health 报告状态', async (t) => {
   assert.equal(h.ok, true);
   assert.equal(h.sessions, 2);
   assert.equal(h.scanning, false);
+});
+
+test('GET /api/settings 返回设置、Agent 元数据与数据文件路径', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+
+  const body = await (await fetch(s.base + '/api/settings')).json();
+  assert.deepEqual(body.settings, {
+    showEmptySessions: false,
+    showTempSessions: false,
+    enabledAgents: ['claude', 'codex', 'dsh', 'workbuddy'],
+    language: 'auto'
+  });
+  assert.deepEqual(
+    body.agents.map(agent => agent.id),
+    ['claude', 'codex', 'dsh', 'workbuddy']
+  );
+  assert.equal(body.dbPath, '/tmp/session-hub-test/hub.db');
+  assert.equal(body.roots.workbuddy, '/data/workbuddy');
+});
+
+test('PUT /api/settings 保存显示开关并立即影响列表、facets 与 health', async (t) => {
+  const s = await makeServer((db) => {
+    const base = { createdAt: 1, archived: 0, tokens: null, extraJson: null };
+    replaceSession(db, {
+      ...base, key: 'claude:empty', agent: 'claude', nativeId: 'empty', title: '空会话',
+      cwd: '/p1', chatId: null, updatedAt: 900, sourcePath: '/x/empty.jsonl', messageCount: 0
+    }, [], { mtimeMs: 900, size: 1 });
+    replaceSession(db, {
+      ...base, key: 'claude:tmp', agent: 'claude', nativeId: 'tmp', title: '临时会话',
+      cwd: '/tmp', chatId: null, updatedAt: 800, sourcePath: '/x/tmp.jsonl', messageCount: 1
+    }, [{ role: 'user', text: '临时' }], { mtimeMs: 800, size: 1 });
+  });
+  t.after(() => s.close());
+
+  const empty = await putJson(s.base + '/api/settings', { showEmptySessions: true });
+  assert.equal(empty.status, 200);
+  assert.equal((await empty.json()).settings.showEmptySessions, true);
+
+  const withEmpty = await (await fetch(s.base + '/api/sessions')).json();
+  assert.ok(withEmpty.sessions.some(session => session.key === 'claude:empty'));
+  assert.equal(withEmpty.sessions.some(session => session.key === 'claude:tmp'), false);
+  assert.equal((await (await fetch(s.base + '/api/health')).json()).sessions, 3);
+
+  await putJson(s.base + '/api/settings', { showTempSessions: true });
+  const withTemp = await (await fetch(s.base + '/api/sessions')).json();
+  assert.ok(withTemp.sessions.some(session => session.key === 'claude:tmp'));
+  assert.equal((await (await fetch(s.base + '/api/health')).json()).sessions, 4);
+});
+
+test('PUT /api/settings 可关闭 Agent，列表与 facets 立即过滤', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+
+  await putJson(s.base + '/api/settings', { enabledAgents: ['claude'] });
+  const filtered = await (await fetch(s.base + '/api/sessions')).json();
+  assert.deepEqual(filtered.sessions.map(session => session.key), ['claude:a']);
+  assert.deepEqual(filtered.facets.agents, [{ agent: 'claude', count: 1 }]);
+  assert.equal((await (await fetch(s.base + '/api/health')).json()).sessions, 1);
+
+  await putJson(s.base + '/api/settings', { enabledAgents: ['claude', 'codex'] });
+  const restored = await (await fetch(s.base + '/api/sessions')).json();
+  assert.deepEqual(restored.sessions.map(session => session.key), ['claude:a', 'codex:b']);
+});
+
+test('PUT /api/settings 拒绝非法 JSON、未知键与空 Agent 集合', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+
+  assert.equal((await putJson(s.base + '/api/settings', '{bad json')).status, 400);
+  assert.equal((await putJson(s.base + '/api/settings', { unknown: true })).status, 400);
+  assert.equal((await putJson(s.base + '/api/settings', { enabledAgents: [] })).status, 400);
+  assert.equal((await fetch(s.base + '/api/settings', { method: 'POST' })).status, 405);
+  assert.equal((await fetch(s.base + '/api/sessions', { method: 'PUT' })).status, 405);
+});
+
+test('界面语言设置持久化，并影响 API 错误与警告语言', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+
+  const saved = await putJson(s.base + '/api/settings', { language: 'zh' });
+  assert.equal((await saved.json()).settings.language, 'zh');
+  assert.equal((await (await fetch(s.base + '/api/settings')).json()).settings.language, 'zh');
+
+  const zhError = await (await fetch(s.base + '/api/session')).json();
+  assert.equal(zhError.error, '缺少 key 参数');
+  assert.equal(zhError.code, 'error.keyRequired');
+
+  await putJson(s.base + '/api/settings', { language: 'en' });
+  const enError = await (await fetch(s.base + '/api/session')).json();
+  assert.equal(enError.error, 'Missing key parameter');
+  assert.equal(enError.code, 'error.keyRequired');
+});
+
+test('未设置语言时按 Accept-Language 协商，警告随之翻译', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+
+  const zh = await (await fetch(s.base + '/api/session', {
+    headers: { 'accept-language': 'zh-CN,zh;q=0.9' }
+  })).json();
+  assert.equal(zh.error, '缺少 key 参数');
+
+  const en = await (await fetch(s.base + '/api/session', {
+    headers: { 'accept-language': 'en-US,en;q=0.9' }
+  })).json();
+  assert.equal(en.error, 'Missing key parameter');
+
+  s.state.warnings = [{ code: 'sourceRootUnavailable', params: { path: '/gone' } }];
+  const zhHealth = await (await fetch(s.base + '/api/health', {
+    headers: { 'accept-language': 'zh-CN' }
+  })).json();
+  assert.deepEqual(zhHealth.warnings, ['来源根目录不可用：/gone']);
+
+  const enHealth = await (await fetch(s.base + '/api/health', {
+    headers: { 'accept-language': 'en-US' }
+  })).json();
+  assert.deepEqual(enHealth.warnings, ['Source root unavailable: /gone']);
+});
+
+test('非法设置返回翻译后的错误与稳定错误码', async (t) => {
+  const s = await makeServer();
+  t.after(() => s.close());
+
+  const zh = await (await putJson(s.base + '/api/settings', { unknown: true }, {
+    'accept-language': 'zh-CN'
+  })).json();
+  assert.equal(zh.error, '未知设置项：unknown');
+  assert.equal(zh.code, 'settings.error.unknownKey');
+
+  const en = await (await putJson(s.base + '/api/settings', { language: 'fr' }, {
+    'accept-language': 'en-US'
+  })).json();
+  assert.equal(en.error, 'Setting language is invalid');
+  assert.equal(en.code, 'settings.error.language');
 });
 
 test('默认隐藏空会话与临时目录，includeHidden=1 可包含', async (t) => {

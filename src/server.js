@@ -1,7 +1,11 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { listSessions, getSession, getFacets, VISIBLE_SESSION_WHERE } from './db.js';
+import {
+  listSessions, getSession, getFacets, countVisibleSessions
+} from './db.js';
+import { getSettings, saveSettings, SUPPORTED_AGENTS } from './settings.js';
+import { t, resolveLanguage, formatWarning } from '../public/i18n.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -41,30 +45,128 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-export function createServer({ db, state, publicDir }) {
+function readJsonBody(req, maxBytes = 65536) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        const error = new Error('error.bodyTooLarge');
+        error.statusCode = 413;
+        error.i18nKey = 'error.bodyTooLarge';
+        reject(error);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        const error = new Error('error.invalidJson');
+        error.statusCode = 400;
+        error.i18nKey = 'error.invalidJson';
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function acceptLanguage(header) {
+  const first = String(header ?? '').split(',')[0]?.trim() ?? '';
+  return first.split(';')[0]?.trim() ?? '';
+}
+
+export function createServer({ db, state, publicDir, config }) {
   const rootDir = path.resolve(publicDir);
-  const countSessions = db.prepare(`SELECT count(*) AS c FROM sessions WHERE ${VISIBLE_SESSION_WHERE}`);
+
+  function visibility(includeHidden = false) {
+    const settings = getSettings(db);
+    return {
+      settings,
+      options: {
+        showEmpty: includeHidden || settings.showEmptySessions,
+        showTemp: includeHidden || settings.showTempSessions,
+        agents: settings.enabledAgents
+      }
+    };
+  }
+
+  function resolveRequestLanguage(req) {
+    const preference = getSettings(db).language;
+    if (preference === 'zh' || preference === 'en') return preference;
+    return resolveLanguage('auto', acceptLanguage(req.headers['accept-language']));
+  }
+
+  function sendError(res, status, lang, key, params) {
+    return sendJson(res, status, { error: t(lang, key, params), code: key });
+  }
 
   return http.createServer(async (req, res) => {
+    const lang = resolveRequestLanguage(req);
     try {
-      if (req.method !== 'GET') {
-        return sendJson(res, 405, { error: 'method not allowed' });
+      if (req.method !== 'GET' && req.method !== 'PUT') {
+        return sendError(res, 405, lang, 'error.methodNotAllowed');
       }
 
       if (!isAllowedHost(req.headers.host)) {
-        return sendJson(res, 403, { error: 'forbidden host' });
+        return sendError(res, 403, lang, 'error.forbiddenHost');
       }
 
       const url = new URL(req.url, 'http://localhost');
       const pathname = url.pathname;
 
+      if (pathname === '/api/settings') {
+        if (req.method === 'PUT') {
+          let patch;
+          try {
+            patch = await readJsonBody(req);
+          } catch (error) {
+            return sendError(
+              res,
+              error.statusCode ?? 400,
+              lang,
+              error.i18nKey ?? 'error.internal'
+            );
+          }
+          let settings;
+          try {
+            settings = saveSettings(db, patch);
+          } catch (error) {
+            return sendError(
+              res,
+              error.statusCode ?? 500,
+              lang,
+              error.i18nKey ?? 'error.internal',
+              error.i18nParams ?? {}
+            );
+          }
+          return sendJson(res, 200, { settings });
+        }
+        const { settings } = visibility();
+        return sendJson(res, 200, {
+          settings,
+          agents: SUPPORTED_AGENTS,
+          dbPath: config?.dbPath ?? null,
+          roots: config?.roots ?? {}
+        });
+      }
+
+      if (req.method !== 'GET') {
+        return sendError(res, 405, lang, 'error.methodNotAllowed');
+      }
+
       if (pathname === '/api/health') {
+        const { options } = visibility();
         return sendJson(res, 200, {
           ok: true,
-          sessions: countSessions.get().c,
+          sessions: countVisibleSessions(db, options),
           scanning: !!state?.scanning,
           lastSyncAt: state?.lastSyncAt ?? null,
-          warnings: state?.warnings ?? []
+          warnings: (state?.warnings ?? []).map(warning => formatWarning(lang, warning))
         });
       }
 
@@ -73,53 +175,58 @@ export function createServer({ db, state, publicDir }) {
         const rawLimit = Number(params.get('limit'));
         const rawSince = Number(params.get('since'));
         const includeHidden = params.get('includeHidden') === '1';
+        const { options } = visibility(includeHidden);
         const sessions = listSessions(db, {
+          ...options,
           agent: params.get('agent') || undefined,
           chat: params.get('chat') || undefined,
           cwd: params.get('cwd') || undefined,
           q: params.get('q') || undefined,
           since: Number.isFinite(rawSince) && rawSince > 0 ? rawSince : undefined,
           limit: Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 5000) : undefined,
-          includeArchived: params.get('archived') !== '0',
-          includeHidden
+          includeArchived: params.get('archived') !== '0'
         });
-        return sendJson(res, 200, { sessions, facets: getFacets(db, { includeHidden }) });
+        return sendJson(res, 200, {
+          sessions,
+          facets: getFacets(db, options)
+        });
       }
 
       if (pathname === '/api/session') {
         const key = url.searchParams.get('key');
-        if (!key) return sendJson(res, 400, { error: 'key required' });
+        if (!key) return sendError(res, 400, lang, 'error.keyRequired');
         const detail = getSession(db, key);
-        if (!detail) return sendJson(res, 404, { error: 'not found' });
+        if (!detail) return sendError(res, 404, lang, 'error.notFound');
         return sendJson(res, 200, detail);
       }
 
       if (pathname === '/api/facets') {
-        return sendJson(res, 200, getFacets(db));
+        const { options } = visibility();
+        return sendJson(res, 200, getFacets(db, options));
       }
 
       if (pathname.startsWith('/api/')) {
-        return sendJson(res, 404, { error: 'not found' });
+        return sendError(res, 404, lang, 'error.notFound');
       }
 
       let decoded;
       try {
         decoded = decodeURIComponent(pathname);
       } catch {
-        return sendJson(res, 404, { error: 'not found' });
+        return sendError(res, 404, lang, 'error.notFound');
       }
 
       const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
       const filePath = path.resolve(rootDir, relative);
       if (filePath !== rootDir && !filePath.startsWith(rootDir + path.sep)) {
-        return sendJson(res, 404, { error: 'not found' });
+        return sendError(res, 404, lang, 'error.notFound');
       }
 
       let data;
       try {
         data = await readFile(filePath);
       } catch {
-        return sendJson(res, 404, { error: 'not found' });
+        return sendError(res, 404, lang, 'error.notFound');
       }
 
       res.writeHead(200, {
@@ -127,8 +234,14 @@ export function createServer({ db, state, publicDir }) {
         'Content-Type': MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream'
       });
       res.end(data);
-    } catch {
-      sendJson(res, 500, { error: 'internal error' });
+    } catch (error) {
+      sendError(
+        res,
+        error?.statusCode ?? 500,
+        lang,
+        error?.i18nKey ?? 'error.internal',
+        error?.i18nParams ?? {}
+      );
     }
   });
 }
