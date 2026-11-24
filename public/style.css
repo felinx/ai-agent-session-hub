@@ -120,6 +120,7 @@ body {
   gap: 0;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 .list-pane {
@@ -392,6 +393,69 @@ body {
   overflow-y: auto;
   padding: 18px 22px 40px;
   min-width: 0;
+}
+
+.detail-jump {
+  position: absolute;
+  right: 26px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+
+.jump-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.94);
+  color: #5b6270;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.jump-btn:hover {
+  background: #fff;
+  color: var(--text);
+}
+
+.jump-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.jump-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  transform: translateY(-50%) translateX(2px);
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: #2f2f2f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 20;
+}
+
+.jump-btn:hover::after,
+.jump-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
 }
 
 .detail-head {

@@ -2,6 +2,7 @@ import { renderMarkdown, formatMaybeJson } from './format.js';
 import { groupSessionsByProject } from './group.js';
 import { messagePlainText, toolResultPlainText } from './copy.js';
 import { t, resolveLanguage } from './i18n.js';
+import { jumpButtonState, jumpScrollBehavior } from './scroll.js';
 
 const state = {
   agent: 'all',
@@ -16,6 +17,7 @@ const state = {
   health: null,
   detailSignature: null,
   listSignature: null,
+  pendingScrollBottom: false,
   loadingSessions: false,
   settingsInfo: null,
   settingsSaving: false,
@@ -67,6 +69,9 @@ const listEl = $('#session-list');
 const emptyEl = $('#list-empty');
 const errorEl = $('#list-error');
 const detailEl = $('#session-detail');
+const jumpEl = $('#detail-jump');
+const jumpTopEl = $('#jump-top');
+const jumpBottomEl = $('#jump-bottom');
 const settingsEl = $('#settings-view');
 const settingsButtonEl = $('#settings-button');
 const statusEl = $('#status');
@@ -201,6 +206,37 @@ function renderView() {
   settingsEl.hidden = !settingsOpen;
   settingsButtonEl.classList.toggle('active', settingsOpen);
   settingsButtonEl.setAttribute('aria-pressed', String(settingsOpen));
+  updateJumpButtons();
+}
+
+function updateJumpButtons() {
+  if (state.view === 'settings' || !state.selected) {
+    jumpEl.hidden = true;
+    return;
+  }
+  const { visible, showTop, showBottom } = jumpButtonState({
+    scrollTop: detailEl.scrollTop,
+    scrollHeight: detailEl.scrollHeight,
+    clientHeight: detailEl.clientHeight
+  });
+  jumpEl.hidden = !visible;
+  jumpTopEl.hidden = !showTop;
+  jumpBottomEl.hidden = !showBottom;
+}
+
+function scrollDetailTo(where, behavior) {
+  const top = where === 'top' ? 0 : detailEl.scrollHeight;
+  const mode = behavior ?? jumpScrollBehavior({
+    from: detailEl.scrollTop,
+    to: top,
+    clientHeight: detailEl.clientHeight
+  });
+  if (typeof detailEl.scrollTo === 'function') {
+    detailEl.scrollTo({ top, behavior: mode });
+  } else {
+    detailEl.scrollTop = top;
+  }
+  if (mode === 'auto') updateJumpButtons();
 }
 
 function applyLanguage() {
@@ -219,14 +255,20 @@ function applyLanguage() {
     renderChips();
   }
   if (state.health) statusEl.textContent = statusLine(state.health);
+  jumpTopEl.dataset.tooltip = tr('detail.jumpTop');
+  jumpTopEl.setAttribute('aria-label', tr('detail.jumpTop'));
+  jumpBottomEl.dataset.tooltip = tr('detail.jumpBottom');
+  jumpBottomEl.setAttribute('aria-label', tr('detail.jumpBottom'));
   if (state.view === 'settings' && state.settingsInfo) {
     renderSettings();
-  } else if (state.selected) {
+  }
+  if (state.selected) {
     state.detailSignature = null;
-    refreshDetail();
-  } else {
+    if (state.view !== 'settings') refreshDetail();
+  } else if (state.view !== 'settings') {
     detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.pick') }));
   }
+  updateJumpButtons();
 }
 
 function renderChips() {
@@ -535,6 +577,7 @@ function renderDetail(detail) {
     ]),
     el('div', { class: 'messages' }, detail.messages.map(renderMessage))
   );
+  updateJumpButtons();
 }
 
 async function openSession(key) {
@@ -546,7 +589,13 @@ async function openSession(key) {
   renderList();
 
   detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.loading') }));
+  detailEl.scrollTop = 0;
+  state.pendingScrollBottom = true;
   await refreshDetail();
+  if (state.pendingScrollBottom) {
+    state.pendingScrollBottom = false;
+    scrollDetailTo('bottom', 'auto');
+  }
 }
 
 async function refreshDetail() {
@@ -844,6 +893,11 @@ settingsButtonEl.addEventListener('click', () => {
   if (state.view === 'settings') closeSettings();
   else openSettings();
 });
+
+jumpTopEl.addEventListener('click', () => scrollDetailTo('top'));
+jumpBottomEl.addEventListener('click', () => scrollDetailTo('bottom'));
+detailEl.addEventListener('scroll', updateJumpButtons, { passive: true });
+window.addEventListener('resize', updateJumpButtons);
 
 let searchTimer;
 searchEl.addEventListener('input', () => {
