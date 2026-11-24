@@ -136,6 +136,18 @@ node bin/session-hub.js doctor    # 检查 Node、本地副本、日志、来源
 - 每 5 秒自动刷新会话列表，详情随会话内容变化刷新
 - 过滤条件与选中会话记录在 URL hash，刷新后保留
 
+## 会话事件 API
+
+下游 Agent 与脚本不必轮询 `/api/sessions`，可以通过一条持久化的事件流跟踪会话变化。
+
+- `GET /api/events?since=<seq>&wait=25` — 长轮询读取变更事件。`since` 是排他游标；省略（或传 `0`）从仍保留的最早事件开始，传 `now`（或 `-1`）只接收未来的事件。`limit` 默认 200（上限 1000），`maxBytes` 默认 8 MB，`wait` 默认 0（上限 25 秒）。`agent`、`type` 接受逗号分隔的过滤条件。响应为 `{events, cursor, hasMore, resync}`。
+- `GET /api/events/stream?since=<seq>` — 相同过滤条件下的 Server-Sent Events。每帧带 `id:`（事件 seq）、`event:`（事件类型）与 `data:`（事件体）。断线重连时客户端通过 `Last-Event-ID` 从最后一条已收事件之后继续；服务端每 15 秒发送一次心跳注释。积压超过 1000 条事件或 32 MB 的慢客户端会收到 `event: resync`，连接随即关闭。
+- `GET /api/status` 与 `GET /api/sessions` 返回 `lastEventSeq`，消费者可以先取快照，再从该游标开始订阅，避免重放首次全量同步。
+
+事件按单调递增的 `seq` 排序，至少投递一次；消费者按 `seq` 去重。事件类型包括 `session.created`、`session.updated`、`session.removed`、`turn.completed`，以及每轮同步一条 `sync.completed`。`turn.completed` 带上最关键的两条消息全文——人的提问与 Agent 的最终回答——中间的过程性思考、工具调用与工具输出不进入事件流。`GET /api/turn?key=…&turn=…` 返回同一 turn 对象及其计数；`GET /api/turn/messages?key=…&turn=…` 通过 `after`、`limit`、`maxBytes` 分页读取整轮原文。
+
+事件保留 7 天、最多最新 50,000 行、载荷不超过 256 MB，任一条件先到即裁剪。游标早于保留窗口时返回 `resync: true`，需从会话快照重新引导。事件流仅限本机、仅 GET，不会离开 `127.0.0.1`。由于 `turn.completed` 与 turn 接口包含完整会话原文，请按会话本身的私密级别对待。
+
 ## 隐私与安全
 
 - 会话内容可能包含代码、路径、密钥、个人对话。**不要**把本服务暴露到公网或转发给他人。
@@ -170,6 +182,8 @@ src/
   doctor.js          只读的环境自检
   config.js          环境变量与默认路径
   db.js              SQLite schema、会话写入、查询、清理、FTS
+  events.js          事件封装、游标解析与序列化
+  turns.js           推断式轮次结束使用的静默窗口
   settings.js        本地设置的读取、校验与保存
   normalize.js       文本/时间归一化、单行摘要
   session-id.js      由会话 key 派生的稳定内部 session id

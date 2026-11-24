@@ -136,6 +136,18 @@ Every changed session produces one line in `~/.session-hub/logs/hub-YYYY-MM-DD.l
 - The session list refreshes automatically every 5 seconds, and the open detail view follows content changes
 - Filters and the selected session are stored in the URL hash, so they survive a reload
 
+## Session events API
+
+Downstream agents and scripts can follow session changes through a durable event feed instead of polling `/api/sessions`.
+
+- `GET /api/events?since=<seq>&wait=25` — long-polling read of the change feed. `since` is an exclusive cursor; omit it (or pass `0`) to read from the oldest retained event, and pass `now` (or `-1`) to receive only future events. `limit` defaults to 200 (max 1000), `maxBytes` to 8 MB, and `wait` to 0 (max 25 seconds). `agent` and `type` accept comma-separated filters. The response is `{events, cursor, hasMore, resync}`.
+- `GET /api/events/stream?since=<seq>` — Server-Sent Events with the same filters. Frames carry `id:` (the event seq), `event:` (the event type), and `data:` (the envelope). A reconnecting client resumes after the last delivered event through `Last-Event-ID`; a heartbeat comment is sent every 15 seconds. A client that falls more than 1000 events or 32 MB behind receives `event: resync` and the connection closes.
+- `GET /api/status` and `GET /api/sessions` return `lastEventSeq`, so a consumer can take a snapshot and then subscribe from that cursor without replaying the initial sync.
+
+Events are ordered by a monotonically increasing `seq` and delivered at least once; consumers deduplicate by `seq`. `session.created`, `session.updated`, `session.removed`, `turn.completed`, and one `sync.completed` per pass are emitted. `turn.completed` carries the full text of the two messages that matter — the human prompt and the agent's final answer — while intermediate reasoning, tool calls, and tool output stay out of the feed. `GET /api/turn?key=…&turn=…` returns the same turn object plus counts, and `GET /api/turn/messages?key=…&turn=…` pages the whole turn (`after`, `limit`, `maxBytes`) with full content.
+
+Events are pruned after 7 days, beyond the newest 50,000 rows, or above 256 MB of payload. A cursor older than the retained window returns `resync: true`; bootstrap again from a session snapshot. The feed is local-only, GET-only, and never leaves `127.0.0.1`. Because `turn.completed` and the turn endpoints contain full transcripts, treat them as privately as the sessions themselves.
+
 ## Privacy and security
 
 - Session content may contain code, paths, secrets, and personal conversations. **Do not** expose this service to the public internet or forward it to others.
@@ -170,6 +182,8 @@ src/
   doctor.js          Read-only environment checks
   config.js          Environment variables and default paths
   db.js              SQLite schema, session writes, queries, pruning, FTS
+  events.js          Event envelopes, cursor parsing, serialization
+  turns.js           Turn settle window used by inferred completion
   settings.js        Read, validate, and persist local settings
   normalize.js       Text/time normalization, one-line summaries
   session-id.js      Stable internal session id derived from the session key

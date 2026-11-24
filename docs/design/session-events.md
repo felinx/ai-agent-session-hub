@@ -1,6 +1,7 @@
 # Session event subscription interface
 
-Status: draft — design only, not implemented.
+Status: P1 implemented — event feed, SSE stream, turn detection, and turn content
+endpoints. P2 (MCP tools) and P3 (outbox/webhooks) remain future work.
 
 ## Summary
 
