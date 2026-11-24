@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS sync_state (
   last_synced_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   session_key UNINDEXED,
   seq UNINDEXED,

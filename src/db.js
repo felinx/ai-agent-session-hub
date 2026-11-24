@@ -181,21 +181,43 @@ function toSession(row) {
 
 // 默认隐藏的会话：没有消息的空会话，以及位于系统临时目录下的会话。
 // 用 cwd 前缀匹配 /tmp、/private/tmp 的子目录，但不误伤 /tmpfoo 这类路径。
-export const VISIBLE_SESSION_WHERE = `
-  message_count > 0
-  AND (cwd IS NULL OR (
-    cwd NOT IN ('/tmp', '/tmp/', '/private/tmp', '/private/tmp/')
-    AND cwd NOT LIKE '/tmp/%'
-    AND cwd NOT LIKE '/private/tmp/%'
-  ))
-`;
+export function visibilityWhere({
+  includeHidden = false,
+  showEmpty = includeHidden,
+  showTemp = includeHidden
+} = {}) {
+  const clauses = [];
+  if (!showEmpty) clauses.push('message_count > 0');
+  if (!showTemp) {
+    clauses.push(`(cwd IS NULL OR (
+      cwd NOT IN ('/tmp', '/tmp/', '/private/tmp', '/private/tmp/')
+      AND cwd NOT LIKE '/tmp/%'
+      AND cwd NOT LIKE '/private/tmp/%'
+    ))`);
+  }
+  return clauses.length ? clauses.join(' AND ') : '1';
+}
+
+export const VISIBLE_SESSION_WHERE = visibilityWhere();
+
+function addAgentsFilter(where, params, agents) {
+  if (!Array.isArray(agents)) return;
+  if (agents.length === 0) {
+    where.push('0');
+    return;
+  }
+  where.push(`agent IN (${agents.map(() => '?').join(', ')})`);
+  params.push(...agents);
+}
 
 export function listSessions(db, query = {}) {
-  const { agent, chat, cwd, q, since, limit = 500, includeArchived = true, includeHidden = false } = query;
-  const where = [];
+  const { agent, chat, cwd, q, since, limit = 500, includeArchived = true, includeHidden = false, agents } = query;
+  const showEmpty = query.showEmpty ?? includeHidden;
+  const showTemp = query.showTemp ?? includeHidden;
+  const where = [visibilityWhere({ showEmpty, showTemp })];
   const params = [];
 
-  if (!includeHidden) where.push(VISIBLE_SESSION_WHERE);
+  addAgentsFilter(where, params, agents);
   if (agent) { where.push('agent = ?'); params.push(agent); }
   if (chat) { where.push('chat_id = ?'); params.push(chat); }
   if (cwd) { where.push('cwd = ?'); params.push(cwd); }
@@ -261,19 +283,34 @@ export function getSession(db, key) {
   return { session: toSession(row), messages };
 }
 
-export function getFacets(db, { includeHidden = false } = {}) {
-  const visible = includeHidden ? '1' : VISIBLE_SESSION_WHERE;
+export function countVisibleSessions(db, options = {}) {
+  const visible = visibilityWhere(options);
+  const where = [visible];
+  const params = [];
+  addAgentsFilter(where, params, options.agents);
+  return db.prepare(
+    `SELECT count(*) AS c FROM sessions WHERE ${where.join(' AND ')}`
+  ).get(...params).c;
+}
+
+export function getFacets(db, options = {}) {
+  const visible = visibilityWhere(options);
+  const where = [visible];
+  const params = [];
+  addAgentsFilter(where, params, options.agents);
+  const base = where.join(' AND ');
+
   return {
     agents: db.prepare(
-      `SELECT agent, count(*) AS count FROM sessions WHERE ${visible} GROUP BY agent ORDER BY agent`
-    ).all(),
+      `SELECT agent, count(*) AS count FROM sessions WHERE ${base} GROUP BY agent ORDER BY agent`
+    ).all(...params),
     chats: db.prepare(
       `SELECT chat_id AS chatId, count(*) AS count FROM sessions
-       WHERE chat_id IS NOT NULL AND ${visible} GROUP BY chat_id ORDER BY chat_id`
-    ).all(),
+       WHERE chat_id IS NOT NULL AND ${base} GROUP BY chat_id ORDER BY chat_id`
+    ).all(...params),
     cwds: db.prepare(
       `SELECT cwd, count(*) AS count FROM sessions
-       WHERE cwd IS NOT NULL AND ${visible} GROUP BY cwd ORDER BY count DESC, cwd`
-    ).all()
+       WHERE cwd IS NOT NULL AND ${base} GROUP BY cwd ORDER BY count DESC, cwd`
+    ).all(...params)
   };
 }

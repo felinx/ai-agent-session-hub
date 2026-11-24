@@ -102,5 +102,30 @@ test('默认隐藏 0 消息会话与 /tmp 临时目录会话', () => {
     listSessions(db, { includeHidden: true, agent: 'claude' }).length,
     5
   );
+
+  assert.deepEqual(
+    listSessions(db, { showEmpty: true }).map(s => s.key),
+    ['claude:empty', 'claude:tmpish', 'claude:a', 'codex:b', 'dsh:c']
+  );
+  assert.deepEqual(
+    listSessions(db, { showTemp: true }).map(s => s.key),
+    ['claude:tmp', 'claude:tmp-sub', 'claude:tmpish', 'claude:a', 'codex:b', 'dsh:c']
+  );
+  assert.equal(getFacets(db, { showEmpty: true }).agents.find(a => a.agent === 'claude').count, 3);
+  db.close();
+});
+
+test('按启用的 Agent 集合过滤列表与 facets', () => {
+  const db = freshDb();
+  assert.deepEqual(
+    listSessions(db, { agents: ['claude', 'dsh'] }).map(s => s.key),
+    ['claude:a', 'dsh:c']
+  );
+  assert.deepEqual(listSessions(db, { agents: [] }), []);
+  assert.deepEqual(
+    getFacets(db, { agents: ['claude'] }).agents.map(row => ({ ...row })),
+    [{ agent: 'claude', count: 1 }]
+  );
+  assert.deepEqual(getFacets(db, { agents: [] }), { agents: [], chats: [], cwds: [] });
   db.close();
 });
