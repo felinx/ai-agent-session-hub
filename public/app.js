@@ -3,6 +3,7 @@ import { groupSessionsByProject } from './group.js';
 import { messagePlainText, toolResultPlainText } from './copy.js';
 import { t, resolveLanguage } from './i18n.js';
 import { jumpButtonState, jumpScrollBehavior } from './scroll.js';
+import { resolveImageSource } from './images.js';
 
 const state = {
   agent: 'all',
@@ -493,7 +494,44 @@ function detailsBlock(summary, bodyNode, copyText) {
 function markdownBlock(text, className) {
   const html = renderMarkdown(text);
   if (!html) return el('div', { class: className, text });
-  return el('div', { class: `${className} markdown`, html });
+  const block = el('div', { class: `${className} markdown`, html });
+  hydrateImages(block);
+  return block;
+}
+
+const MISSING_IMAGE_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="3" y="4" width="14" height="12" rx="2"/>' +
+  '<path d="m4.5 13 3.5-3.5 2.5 2.5 2-2 3 3"/><circle cx="12.5" cy="7.5" r="1"/>' +
+  '<path d="M3 3l14 14"/></svg>';
+
+function showMissingImage(img, source) {
+  const label = tr('image.missing', { path: source });
+  img.replaceWith(el('span', { class: 'image-missing', title: label }, [
+    el('span', { class: 'image-missing-icon', html: MISSING_IMAGE_ICON }),
+    el('span', { class: 'image-missing-text' }, [
+      tr('image.missingLabel'),
+      el('code', { text: source })
+    ])
+  ]));
+}
+
+// 图片先以 data-image-src 输出，渲染后再按当前会话解析成只读资源地址；
+// 加载失败（例如文件已被删除）时替换为占位样式。
+function hydrateImages(container) {
+  const sessionKey = state.selected;
+  for (const img of container.querySelectorAll('img[data-image-src]')) {
+    const source = img.dataset.imageSrc;
+    const resolved = resolveImageSource(sessionKey, source);
+    img.removeAttribute('data-image-src');
+    if (!resolved) {
+      showMissingImage(img, source);
+      continue;
+    }
+    if (!img.alt) img.alt = tr('image.alt');
+    img.referrerPolicy = 'no-referrer';
+    img.addEventListener('error', () => showMissingImage(img, source), { once: true });
+    img.src = resolved;
+  }
 }
 
 function jsonText(value) {

@@ -328,3 +328,55 @@ test('静态 PNG 以 image/png 返回', async (t) => {
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /image\/png/);
 });
+
+function seedSessionWithCwd(db, key, cwd) {
+  replaceSession(db, {
+    createdAt: 1, archived: 0, messageCount: 0, tokens: null, extraJson: null,
+    key, agent: 'claude', nativeId: key.split(':')[1], title: 'asset',
+    cwd, chatId: null, updatedAt: 1, sourcePath: `/x/${key}.jsonl`
+  }, [], { mtimeMs: 1, size: 1 });
+}
+
+test('GET /api/session/asset 只返回会话目录内的图片', async (t) => {
+  const { mkdirSync, symlinkSync } = await import('node:fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'sh-asset-'));
+  const outside = mkdtempSync(path.join(tmpdir(), 'sh-asset-out-'));
+  mkdirSync(path.join(dir, 'shots'));
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  writeFileSync(path.join(dir, 'shots', 'pixel.png'), png);
+  writeFileSync(path.join(dir, 'notes.txt'), 'text');
+  writeFileSync(path.join(outside, 'secret.png'), png);
+  try {
+    symlinkSync(path.join(outside, 'secret.png'), path.join(dir, 'link.png'));
+  } catch {}
+
+  const s = await makeServer(db => seedSessionWithCwd(db, 'claude:img', dir));
+  t.after(() => s.close());
+
+  const ok = await fetch(s.base + '/api/session/asset?key=' + encodeURIComponent('claude:img')
+    + '&path=' + encodeURIComponent('shots/pixel.png'));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await ok.arrayBuffer()), png);
+
+  const absoluteInside = await fetch(s.base + '/api/session/asset?key=claude%3Aimg&path='
+    + encodeURIComponent(path.join(dir, 'shots', 'pixel.png')));
+  assert.equal(absoluteInside.status, 200);
+
+  for (const bad of [
+    'shots/gone.png',
+    'notes.txt',
+    path.relative(dir, outside) + '/secret.png',
+    path.join(outside, 'secret.png')
+  ]) {
+    const res = await fetch(s.base + '/api/session/asset?key=claude%3Aimg&path=' + encodeURIComponent(bad));
+    assert.equal(res.status, 404, `${bad} 应被拒绝`);
+  }
+
+  const symlink = await fetch(s.base + '/api/session/asset?key=claude%3Aimg&path=link.png');
+  assert.equal(symlink.status, 404);
+
+  assert.equal((await fetch(s.base + '/api/session/asset?key=claude%3Aimg')).status, 400);
+  assert.equal((await fetch(s.base + '/api/session/asset?path=a.png')).status, 400);
+  assert.equal((await fetch(s.base + '/api/session/asset?key=nope&path=a.png')).status, 404);
+});

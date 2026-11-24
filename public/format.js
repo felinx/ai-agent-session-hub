@@ -22,6 +22,11 @@ function renderInline(escaped) {
 
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  text = text.replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (match, alt, src) => {
+    // 只接受 http(s)、data:image 或无协议的本地路径；其余（javascript:、file: 等）保持原文。
+    if (!/^(?:https?:\/\/|data:image\/|[^:]*$)/i.test(src)) return match;
+    return `<img class="message-image" data-image-src="${src}" alt="${alt}" loading="lazy">`;
+  });
   text = text.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
     if (!SAFE_HREF_RE.test(href)) return match;
     return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;

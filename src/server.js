@@ -1,8 +1,8 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  listSessions, getSession, getFacets, countVisibleSessions
+  listSessions, getSession, getSessionCwd, getFacets, countVisibleSessions
 } from './db.js';
 import { getSettings, saveSettings, SUPPORTED_AGENTS } from './settings.js';
 import { t, resolveLanguage, formatWarning, detectSystemLanguage } from '../public/i18n.js';
@@ -24,6 +24,38 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Cross-Origin-Resource-Policy': 'same-origin'
 };
+
+const ASSET_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml'
+};
+const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+
+// 只读取会话 cwd 内的图片文件：解析真实路径后仍必须位于 cwd 内，
+// 这样 ../、绝对路径和符号链接都无法逃逸到目录之外。
+async function readSessionAsset(cwd, requested) {
+  if (!ASSET_MIME[path.extname(requested).toLowerCase()]) return null;
+  try {
+    const baseReal = await realpath(cwd);
+    const target = path.isAbsolute(requested) ? path.resolve(requested) : path.resolve(baseReal, requested);
+    const targetReal = await realpath(target);
+    if (targetReal !== baseReal && !targetReal.startsWith(baseReal + path.sep)) return null;
+    const info = await stat(targetReal);
+    if (!info.isFile() || info.size > MAX_ASSET_BYTES) return null;
+    const type = ASSET_MIME[path.extname(targetReal).toLowerCase()];
+    if (!type) return null;
+    return { data: await readFile(targetReal), type };
+  } catch {
+    return null;
+  }
+}
 
 function isAllowedHost(hostHeader) {
   if (!hostHeader) return false;
@@ -188,6 +220,24 @@ export function createServer({
           sessions,
           facets: getFacets(db, options)
         });
+      }
+
+      if (pathname === '/api/session/asset') {
+        const key = url.searchParams.get('key');
+        const requested = url.searchParams.get('path');
+        if (!key || !requested) return sendError(res, 400, lang, 'error.keyRequired');
+        const cwd = getSessionCwd(db, key);
+        const asset = cwd ? await readSessionAsset(cwd, requested) : null;
+        if (!asset) return sendError(res, 404, lang, 'error.assetNotFound');
+        res.writeHead(200, {
+          ...SECURITY_HEADERS,
+          'Content-Type': asset.type,
+          ...(asset.type === 'image/svg+xml'
+            ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }
+            : {})
+        });
+        res.end(asset.data);
+        return;
       }
 
       if (pathname === '/api/session') {

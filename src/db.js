@@ -246,6 +246,11 @@ export function listSessions(db, query = {}) {
   return db.prepare(sql).all(...params).map(toSession);
 }
 
+export function getSessionCwd(db, key) {
+  const row = db.prepare('SELECT cwd FROM sessions WHERE key = ?').get(key);
+  return row?.cwd ?? null;
+}
+
 export function getSession(db, key) {
   const row = db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE key = ?`).get(key);
   if (!row) return null;

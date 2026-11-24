@@ -60,9 +60,10 @@ npm start -- --rebuild
 - All projects start collapsed. The open/closed state of the **Projects** and **Recent** sections and of each project is stored in browser localStorage, so it survives reloads and future visits
 - Sessions with 0 messages and temporary sessions whose cwd is under `/tmp` or `/private/tmp` (including subdirectories) are hidden by default; pass `includeHidden=1` to the API to see them
 - A **Settings** page at the bottom of the sidebar lets you toggle empty and temporary sessions independently, enable or disable supported agents, switch the interface language, and inspect the local database and source directories. Disabling an agent stops syncing and removes its local copy; re-enabling it reads the source files again
-- The interface and all error messages are available in **Chinese and English**. The language follows your system/browser language by default; you can override it in **Settings → Interface language** (System / 中文 / English)
+- The interface and all error messages are available in **Chinese and English**. The language follows your system language by default; you can override it in **Settings → Interface language** (System / 中文 / English)
 - Full-text search (SQLite FTS5 trigram; automatically falls back to `LIKE` for queries shorter than 3 characters)
 - Session detail: message order, thinking, tool calls, and tool results (collapsible). Messages, thinking, and tool content are rendered as Markdown, with automatic JSON indentation/formatting
+- Markdown images in session content are shown inline. Relative paths (for example `![shot](shots/a.png)`) are resolved against the session's cwd and served read-only; files that no longer exist render as a deleted-image placeholder
 - One-click copy buttons on every message and on each thinking, tool-call, and tool-result block (copies the original text, not the rendered HTML)
 - Auxiliary sessions are excluded: Codex `onboarding_checklist` sessions do not appear in the session list
 - WorkBuddy reasoning, tool calls, tool results, and AI titles are parsed; internal data such as `isMeta`, context compaction, `skipRun`, and aborted records is filtered out
@@ -86,6 +87,7 @@ npm start -- --rebuild
 - Session content may contain code, paths, secrets, and personal conversations. **Do not** expose this service to the public internet or forward it to others.
 - The service binds only to `127.0.0.1` and has no authentication; it relies on local access control.
 - All responses use `Cache-Control: no-store`; static file paths are protected against traversal.
+- Session images are served only from inside the session's own working directory, and only for known image extensions; `..`, absolute paths outside it, symlinks, and other files are rejected.
 - The local copy database directory uses mode `0700`; the database and its WAL/SHM files use `0600`.
 
 ## Tests

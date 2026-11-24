@@ -629,6 +629,60 @@ details:not([open]) > summary.detail-toggle .copy-btn {
 
 .markdown { overflow-wrap: anywhere; }
 
+.markdown img.message-image {
+  display: block;
+  max-width: min(100%, 720px);
+  max-height: 420px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.image-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin: 8px 0;
+  padding: 9px 12px;
+  border: 1px dashed #cfd5dd;
+  border-radius: 8px;
+  background: #fafbfc;
+  color: #8a8f98;
+  font-size: 12px;
+}
+
+.image-missing-icon {
+  display: inline-flex;
+  flex: none;
+  color: #a9aeb6;
+}
+
+.image-missing-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.image-missing-text {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.image-missing-text code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f0f2f5;
+  color: #6b7280;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
 .markdown p { margin: 0 0 8px; }
 .markdown > :last-child { margin-bottom: 0; }
 

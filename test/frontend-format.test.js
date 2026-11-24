@@ -55,3 +55,23 @@ test('formatMaybeJson 格式化 JSON，非 JSON 返回 null', () => {
   assert.equal(formatMaybeJson(''), null);
   assert.equal(formatMaybeJson('{bad'), null);
 });
+
+test('renderMarkdown 把本地图片渲染成待解析的 img 标签', () => {
+  const html = renderMarkdown('![页头实机效果](session-hub-logo/live-header.png)');
+  assert.match(html, /<img /);
+  assert.match(html, /data-image-src="session-hub-logo\/live-header\.png"/);
+  assert.match(html, /alt="页头实机效果"/);
+  assert.equal(html.includes('<a '), false);
+});
+
+test('renderMarkdown 拒绝 javascript: 等危险图片地址', () => {
+  const html = renderMarkdown('![坏](javascript:alert(1))');
+  assert.equal(html.includes('<img'), false);
+  assert.equal(html.includes('javascript:alert'), true);
+});
+
+test('renderMarkdown 转义图片 alt 中的标签', () => {
+  const html = renderMarkdown('![<script>x</script>](a.png)');
+  assert.equal(html.includes('<script>'), false);
+  assert.match(html, /alt="&lt;script&gt;x&lt;\/script&gt;"/);
+});
