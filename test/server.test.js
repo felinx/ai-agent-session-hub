@@ -58,6 +58,7 @@ async function makeServer(extraSeed, extraFiles = {}, options = {}) {
 
   return {
     base: `http://127.0.0.1:${port}`,
+    publicDir,
     state,
     close: () => new Promise(resolve => server.close(() => { db.close(); resolve(); }))
   };
@@ -379,4 +380,49 @@ test('GET /api/session/asset 只返回会话目录内的图片', async (t) => {
   assert.equal((await fetch(s.base + '/api/session/asset?key=claude%3Aimg')).status, 400);
   assert.equal((await fetch(s.base + '/api/session/asset?path=a.png')).status, 400);
   assert.equal((await fetch(s.base + '/api/session/asset?key=nope&path=a.png')).status, 404);
+});
+
+test('首页引用的静态资源自动带内容版本号', async (t) => {
+  const s = await makeServer(undefined, {
+    'index.html': '<!doctype html>'
+      + '<link rel="stylesheet" href="/style.css">'
+      + '<link rel="icon" href="/favicon.svg">'
+      + '<script type="module" src="/app.js"></script>'
+      + '<img src="/logo.svg">'
+      + '<img src="/missing.png">',
+    'style.css': 'body{color:red}',
+    'app.js': 'console.log(1)',
+    'logo.svg': '<svg/>',
+    'favicon.svg': '<svg/>'
+  });
+  t.after(() => s.close());
+
+  const html = await (await fetch(s.base + '/')).text();
+  assert.match(html, /href="\/style\.css\?v=[0-9a-f]{10}"/);
+  assert.match(html, /href="\/favicon\.svg\?v=[0-9a-f]{10}"/);
+  assert.match(html, /src="\/app\.js\?v=[0-9a-f]{10}"/);
+  assert.match(html, /src="\/logo\.svg\?v=[0-9a-f]{10}"/);
+  assert.match(html, /src="\/missing\.png"/);
+
+  const css = await fetch(s.base + '/style.css?v=whatever');
+  assert.equal(css.status, 200);
+  assert.equal(await css.text(), 'body{color:red}');
+});
+
+test('静态资源内容变化后版本号随之变化', async (t) => {
+  const s = await makeServer(undefined, {
+    'index.html': '<link rel="stylesheet" href="/style.css">',
+    'style.css': 'body{color:red}'
+  });
+  t.after(() => s.close());
+
+  const versionOf = async () => {
+    const html = await (await fetch(s.base + '/')).text();
+    return html.match(/style\.css\?v=([0-9a-f]+)/)?.[1];
+  };
+
+  const before = await versionOf();
+  assert.ok(before);
+  writeFileSync(path.join(s.publicDir, 'style.css'), 'body{color:blue;padding:0}');
+  assert.notEqual(await versionOf(), before);
 });

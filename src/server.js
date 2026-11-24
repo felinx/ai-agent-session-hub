@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -132,6 +133,47 @@ export function createServer({
 
   function sendError(res, status, lang, key, params) {
     return sendJson(res, status, { error: t(lang, key, params), code: key });
+  }
+
+  // 给首页引用到的静态资源追加内容哈希，文件一改地址就变，绕过浏览器和 favicon 缓存。
+  const versionCache = new Map();
+
+  async function assetVersion(ref) {
+    let filePath;
+    try {
+      filePath = path.resolve(rootDir, decodeURIComponent(ref).replace(/^\/+/, ''));
+    } catch {
+      return null;
+    }
+    if (filePath !== rootDir && !filePath.startsWith(rootDir + path.sep)) return null;
+    try {
+      const info = await stat(filePath);
+      if (!info.isFile()) return null;
+      const cached = versionCache.get(filePath);
+      if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+        return cached.version;
+      }
+      const data = await readFile(filePath);
+      const version = createHash('sha256').update(data).digest('hex').slice(0, 10);
+      versionCache.set(filePath, { mtimeMs: info.mtimeMs, size: info.size, version });
+      return version;
+    } catch {
+      return null;
+    }
+  }
+
+  async function withAssetVersions(html) {
+    const refs = new Set();
+    for (const match of html.matchAll(/(?:href|src)="(\/[^"?#]+)"/g)) refs.add(match[1]);
+    const versions = new Map();
+    await Promise.all([...refs].map(async ref => {
+      const version = await assetVersion(ref);
+      if (version) versions.set(ref, version);
+    }));
+    return html.replace(/(href|src)="(\/[^"?#]+)"/g, (match, attr, ref) => {
+      const version = versions.get(ref);
+      return version ? `${attr}="${ref}?v=${version}"` : match;
+    });
   }
 
   return http.createServer(async (req, res) => {
@@ -270,16 +312,18 @@ export function createServer({
         return sendError(res, 404, lang, 'error.notFound');
       }
 
+      const ext = path.extname(filePath).toLowerCase();
       let data;
       try {
         data = await readFile(filePath);
       } catch {
         return sendError(res, 404, lang, 'error.notFound');
       }
+      if (ext === '.html') data = await withAssetVersions(data.toString('utf8'));
 
       res.writeHead(200, {
         ...SECURITY_HEADERS,
-        'Content-Type': MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+        'Content-Type': MIME[ext] ?? 'application/octet-stream'
       });
       res.end(data);
     } catch (error) {

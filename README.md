@@ -87,6 +87,7 @@ npm start -- --rebuild
 - Session content may contain code, paths, secrets, and personal conversations. **Do not** expose this service to the public internet or forward it to others.
 - The service binds only to `127.0.0.1` and has no authentication; it relies on local access control.
 - All responses use `Cache-Control: no-store`; static file paths are protected against traversal.
+- Assets referenced from `index.html` (CSS, JS, logo, favicons) get a content-hash `?v=` query, so changing a file also busts browser and favicon caches.
 - Session images are served only from inside the session's own working directory, and only for known image extensions; `..`, absolute paths outside it, symlinks, and other files are rejected.
 - The local copy database directory uses mode `0700`; the database and its WAL/SHM files use `0600`.
 
