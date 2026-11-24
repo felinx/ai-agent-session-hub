@@ -15,6 +15,9 @@ const state = {
 const collapsedProjects = new Set();
 const collapsedSections = new Set();
 
+const FOLDER_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
+  '<path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.6c.4 0 .78.16 1.06.44L10.1 5.9H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>';
+
 const $ = (selector) => document.querySelector(selector);
 const listEl = $('#session-list');
 const emptyEl = $('#list-empty');
@@ -143,7 +146,7 @@ function sessionItem(session) {
   }, [
     el('div', { class: 'session-title-row' }, [
       el('span', { class: `dot ${session.agent}` }),
-      el('strong', { class: 'session-title', text: session.title }),
+      el('span', { class: 'session-title', text: session.title }),
       el('span', { class: 'session-time', text: relativeTime(session.updatedAt) })
     ])
   ]);
@@ -177,8 +180,8 @@ function projectNode(group) {
     ...(collapsedProjects.has(key) ? {} : { open: '' })
   }, [
     el('summary', { class: 'project-head' }, [
-      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) }),
-      el('span', { class: 'project-count', text: String(group.sessions.length) })
+      el('span', { class: 'project-icon', html: FOLDER_ICON }),
+      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) })
     ]),
     el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
   ]);
