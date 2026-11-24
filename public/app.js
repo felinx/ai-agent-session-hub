@@ -838,7 +838,6 @@ function renderSettings() {
     el('div', { class: 'settings-inner' }, [
       el('header', { class: 'settings-head' }, [
         el('div', {}, [
-          el('p', { class: 'settings-eyebrow', text: tr('settings.eyebrow') }),
           el('h2', { text: tr('settings.title') })
         ]),
         el('button', { class: 'settings-back', type: 'button', onclick: closeSettings }, [
@@ -938,7 +937,6 @@ function renderStatus() {
     el('div', { class: 'settings-inner' }, [
       el('header', { class: 'settings-head' }, [
         el('div', {}, [
-          el('p', { class: 'settings-eyebrow', text: tr('status.eyebrow') }),
           el('h2', { text: tr('status.title') })
         ]),
         el('button', { class: 'settings-back', type: 'button', onclick: closeStatus }, [

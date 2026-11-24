@@ -987,14 +987,6 @@ pre.tool {
   gap: 16px;
 }
 
-.settings-eyebrow {
-  margin: 0 0 3px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1.4px;
-}
-
 .settings-head h2 {
   margin: 0;
   font-size: 22px;
