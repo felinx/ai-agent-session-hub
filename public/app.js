@@ -1,18 +1,31 @@
 import { renderMarkdown, formatMaybeJson } from './format.js';
 import { groupSessionsByProject } from './group.js';
 import { messagePlainText, toolResultPlainText } from './copy.js';
+import { t, resolveLanguage } from './i18n.js';
 
 const state = {
   agent: 'all',
   q: '',
   since: '',
   selected: null,
+  view: 'chat',
+  lang: resolveLanguage('auto', navigator.language),
+  languagePreference: 'auto',
   sessions: [],
   facets: { agents: [], chats: [], cwds: [] },
+  health: null,
   detailSignature: null,
   listSignature: null,
-  loadingSessions: false
+  loadingSessions: false,
+  settingsInfo: null,
+  settingsSaving: false,
+  settingsStatus: '',
+  settingsStatusKind: ''
 };
+
+function tr(key, params) {
+  return t(state.lang, key, params);
+}
 
 const STORAGE_PREFIX = 'session-hub:';
 
@@ -34,6 +47,11 @@ function saveKeySet(key, set) {
 // 项目默认全部收起；记住用户展开过的项目与手动收起的区块。
 const expandedProjects = loadKeySet(`${STORAGE_PREFIX}expanded-projects`);
 const closedSections = loadKeySet(`${STORAGE_PREFIX}closed-sections`);
+if (closedSections.has('项目') || closedSections.has('最近')) {
+  if (closedSections.delete('项目')) closedSections.add('projects');
+  if (closedSections.delete('最近')) closedSections.add('recent');
+  saveKeySet(`${STORAGE_PREFIX}closed-sections`, closedSections);
+}
 
 const FOLDER_CLOSED_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
   '<path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.6c.4 0 .78.16 1.06.44L10.1 5.9H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>';
@@ -49,6 +67,8 @@ const listEl = $('#session-list');
 const emptyEl = $('#list-empty');
 const errorEl = $('#list-error');
 const detailEl = $('#session-detail');
+const settingsEl = $('#settings-view');
+const settingsButtonEl = $('#settings-button');
 const statusEl = $('#status');
 const searchEl = $('#search');
 const chipsEl = $('#agent-chips');
@@ -112,21 +132,22 @@ function copyButton(readText) {
   const button = el('button', {
     class: 'copy-btn',
     type: 'button',
-    'data-tooltip': '复制',
-    'aria-label': '复制',
+    'data-tooltip': tr('copy.copy'),
+    'aria-label': tr('copy.copy'),
     html: COPY_ICON,
     onclick: async (event) => {
       event.preventDefault();
       event.stopPropagation();
       const text = typeof readText === 'function' ? readText() : readText;
       const ok = await copyToClipboard(text ?? '');
-      button.dataset.tooltip = ok ? '已复制' : '复制失败';
-      button.setAttribute('aria-label', ok ? '已复制' : '复制失败');
+      const label = ok ? tr('copy.copied') : tr('copy.failed');
+      button.dataset.tooltip = label;
+      button.setAttribute('aria-label', label);
       button.classList.toggle('copied', ok);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        button.dataset.tooltip = '复制';
-        button.setAttribute('aria-label', '复制');
+        button.dataset.tooltip = tr('copy.copy');
+        button.setAttribute('aria-label', tr('copy.copy'));
         button.classList.remove('copied');
       }, 1500);
     }
@@ -134,17 +155,22 @@ function copyButton(readText) {
   return button;
 }
 
-function relativeTime(ms) {  if (!ms) return '未知时间';
+function localeTag() {
+  return state.lang === 'zh' ? 'zh-CN' : 'en-US';
+}
+
+function relativeTime(ms) {
+  if (!ms) return tr('common.unknownTime');
   const diff = Date.now() - ms;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
-  return new Date(ms).toLocaleDateString();
+  if (diff < 60_000) return tr('time.justNow');
+  if (diff < 3_600_000) return tr('time.minutesAgo', { count: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return tr('time.hoursAgo', { count: Math.floor(diff / 3_600_000) });
+  if (diff < 30 * 86_400_000) return tr('time.daysAgo', { count: Math.floor(diff / 86_400_000) });
+  return new Date(ms).toLocaleDateString(localeTag());
 }
 
 function formatTime(ms) {
-  return ms ? new Date(ms).toLocaleString() : '未知';
+  return ms ? new Date(ms).toLocaleString(localeTag()) : tr('common.unknown');
 }
 
 function writeHash() {
@@ -153,6 +179,7 @@ function writeHash() {
   if (state.q) params.set('q', state.q);
   if (state.since) params.set('since', state.since);
   if (state.selected) params.set('session', state.selected);
+  if (state.view === 'settings') params.set('view', 'settings');
   const next = params.toString();
   const target = next ? `#${next}` : location.pathname;
   history.replaceState(null, '', target);
@@ -164,7 +191,42 @@ function readHash() {
   state.q = params.get('q') || '';
   state.since = params.get('since') || '';
   state.selected = params.get('session') || null;
+  state.view = params.get('view') === 'settings' ? 'settings' : 'chat';
   searchEl.value = state.q;
+}
+
+function renderView() {
+  const settingsOpen = state.view === 'settings';
+  detailEl.hidden = settingsOpen;
+  settingsEl.hidden = !settingsOpen;
+  settingsButtonEl.classList.toggle('active', settingsOpen);
+  settingsButtonEl.setAttribute('aria-pressed', String(settingsOpen));
+}
+
+function applyLanguage() {
+  state.lang = resolveLanguage(state.languagePreference, navigator.language);
+  document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'en';
+  document.title = tr('app.title');
+  searchEl.placeholder = tr('search.placeholder');
+  searchEl.setAttribute('aria-label', tr('search.aria'));
+  chipsEl.setAttribute('aria-label', tr('chip.aria'));
+  const settingsLabel = settingsButtonEl.querySelector('span');
+  if (settingsLabel) settingsLabel.textContent = tr('settings.button');
+  emptyEl.textContent = tr('list.empty');
+  renderFilters();
+  if (state.listSignature !== null) {
+    renderList();
+    renderChips();
+  }
+  if (state.health) statusEl.textContent = statusLine(state.health);
+  if (state.view === 'settings' && state.settingsInfo) {
+    renderSettings();
+  } else if (state.selected) {
+    state.detailSignature = null;
+    refreshDetail();
+  } else {
+    detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.pick') }));
+  }
 }
 
 function renderChips() {
@@ -185,15 +247,15 @@ function renderChips() {
       }
     }, [
       entry.agent === 'all' ? null : agentIcon(entry.agent),
-      `${entry.agent === 'all' ? '全部' : entry.agent} ${entry.count}`
+      `${entry.agent === 'all' ? tr('common.all') : entry.agent} ${entry.count}`
     ]));
   }
 }
 
-function selectEl(name, options, value) {
+function selectEl(name, options, value, ariaLabel = name) {
   const select = el('select', {
     class: 'filter-select',
-    'aria-label': name,
+    'aria-label': ariaLabel,
     onchange: (event) => {
       state[name] = event.target.value;
       writeHash();
@@ -213,20 +275,21 @@ function selectEl(name, options, value) {
 function renderFilters() {
   filtersEl.replaceChildren(
     selectEl('since', [
-      ['', '所有时间'],
-      ['86400000', '24 小时内'],
-      ['604800000', '7 天内'],
-      ['2592000000', '30 天内']
-    ], state.since)
+      ['', tr('filter.allTime')],
+      ['86400000', tr('filter.24h')],
+      ['604800000', tr('filter.7d')],
+      ['2592000000', tr('filter.30d')]
+    ], state.since, tr('filter.aria'))
   );
 }
 
 function sessionItem(session) {
+  const title = sessionTitle(session);
   return el('li', {
     class: `session-item${state.selected === session.key ? ' active' : ''}`,
     tabindex: '0',
     role: 'button',
-    title: session.title,
+    title,
     onclick: () => openSession(session.key),
     onkeydown: (event) => {
       if (event.key === 'Enter' || event.key === ' ') openSession(session.key);
@@ -234,23 +297,34 @@ function sessionItem(session) {
   }, [
     el('div', { class: 'session-title-row' }, [
       agentIcon(session.agent, session.agent),
-      el('span', { class: 'session-title', text: session.title }),
+      el('span', { class: 'session-title', text: title }),
       el('span', { class: 'session-time', text: relativeTime(session.updatedAt) })
     ])
   ]);
 }
 
+const LEGACY_UNTITLED_RE = /^未命名会话(?: · (.+))?$/;
+
+function sessionTitle(session) {
+  const title = session?.title ?? '';
+  const legacy = LEGACY_UNTITLED_RE.exec(title);
+  if (legacy) {
+    return legacy[1] ? tr('session.untitledWithId', { id: legacy[1] }) : tr('session.untitled');
+  }
+  return title || tr('session.untitled');
+}
+
 function projectLabel(cwd) {
-  if (!cwd) return '未归类';
+  if (!cwd) return tr('project.uncategorized');
   const parts = cwd.split('/').filter(Boolean);
   return parts.at(-1) || cwd;
 }
 
-function sidebarSection(label, bodyNode) {
+function sidebarSection(storageKey, label, bodyNode) {
   const key = `${STORAGE_PREFIX}closed-sections`;
   const details = el('details', {
     class: 'section',
-    ...(closedSections.has(label) ? {} : { open: '' })
+    ...(closedSections.has(storageKey) ? {} : { open: '' })
   }, [
     el('summary', { class: 'section-head' }, [
       label,
@@ -259,8 +333,8 @@ function sidebarSection(label, bodyNode) {
     bodyNode
   ]);
   details.addEventListener('toggle', () => {
-    if (details.open) closedSections.delete(label);
-    else closedSections.add(label);
+    if (details.open) closedSections.delete(storageKey);
+    else closedSections.add(storageKey);
     saveKeySet(key, closedSections);
   });
   return el('li', { class: 'sidebar-section' }, [details]);
@@ -277,7 +351,7 @@ function projectNode(group) {
         el('span', { class: 'folder folder-closed', html: FOLDER_CLOSED_ICON }),
         el('span', { class: 'folder folder-open', html: FOLDER_OPEN_ICON })
       ]),
-      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) })
+      el('span', { class: 'project-name', title: group.cwd || tr('project.uncategorized'), text: projectLabel(group.cwd) })
     ]),
     el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
   ]);
@@ -297,17 +371,17 @@ function renderList() {
   const projectGroups = groupSessionsByProject(state.sessions).map(projectNode);
 
   listEl.append(
-    sidebarSection('项目', el('ul', { class: 'project-groups' }, projectGroups)),
-    sidebarSection('最近', el('ul', { class: 'session-list recent-sessions' }, state.sessions.map(sessionItem)))
+    sidebarSection('projects', tr('sidebar.projects'), el('ul', { class: 'project-groups' }, projectGroups)),
+    sidebarSection('recent', tr('sidebar.recent'), el('ul', { class: 'session-list recent-sessions' }, state.sessions.map(sessionItem)))
   );
 }
 
 function statusLine(health) {
-  if (!health) return `${state.sessions.length} 个会话`;
-  const parts = [`${health.sessions} 个会话`];
-  if (health.scanning) parts.push('同步中…');
-  else if (health.lastSyncAt) parts.push(`上次同步 ${relativeTime(health.lastSyncAt)}`);
-  if (health.warnings?.length) parts.push(`${health.warnings.length} 条警告`);
+  if (!health) return tr('status.sessions', { count: state.sessions.length });
+  const parts = [tr('status.sessions', { count: health.sessions })];
+  if (health.scanning) parts.push(tr('status.scanning'));
+  else if (health.lastSyncAt) parts.push(tr('status.lastSync', { time: relativeTime(health.lastSyncAt) }));
+  if (health.warnings?.length) parts.push(tr('status.warnings', { count: health.warnings.length }));
   return parts.join(' · ');
 }
 
@@ -330,6 +404,15 @@ async function loadSessions() {
     state.sessions = body.sessions;
     state.facets = body.facets ?? state.facets;
     const health = healthRes.ok ? await healthRes.json() : null;
+    state.health = health;
+
+    if (state.agent !== 'all' && !(state.facets.agents ?? []).some(item => item.agent === state.agent)) {
+      state.agent = 'all';
+      writeHash();
+      state.loadingSessions = false;
+      setTimeout(loadSessions, 0);
+      return;
+    }
 
     errorEl.hidden = true;
     renderChips();
@@ -345,8 +428,8 @@ async function loadSessions() {
     statusEl.title = health?.warnings?.join('\n') ?? '';
   } catch (error) {
     errorEl.hidden = false;
-    errorEl.textContent = `加载失败：${error.message}`;
-    statusEl.textContent = '连接失败';
+    errorEl.textContent = tr('list.loadFailed', { message: error.message });
+    statusEl.textContent = tr('status.connectionFailed');
   } finally {
     state.loadingSessions = false;
   }
@@ -354,7 +437,11 @@ async function loadSessions() {
 
 function detailsBlock(summary, bodyNode, copyText) {
   return el('details', {}, [
-    el('summary', { class: 'detail-toggle' }, [summary, copyButton(copyText)]),
+    el('summary', { class: 'detail-toggle' }, [
+      el('span', { class: 'chevron', html: CHEVRON_ICON }),
+      el('span', { class: 'detail-toggle-label', text: summary }),
+      copyButton(copyText)
+    ]),
     bodyNode
   ]);
 }
@@ -368,7 +455,7 @@ function markdownBlock(text, className) {
 
 function jsonText(value) {
   if (typeof value === 'string') return formatMaybeJson(value) ?? value;
-  if (value === undefined || value === null) return '（无参数）';
+  if (value === undefined || value === null) return tr('message.noArgs');
   try {
     return JSON.stringify(value, null, 2);
   } catch {
@@ -382,13 +469,21 @@ function renderToolResult(result) {
   return markdownBlock(result.output ?? '', 'tool-output');
 }
 
+function messageLabels() {
+  return {
+    toolCall: name => tr('message.toolCall', { name: name ?? 'unknown' }),
+    toolResult: tr('message.toolResult'),
+    errorSuffix: tr('message.errorSuffix')
+  };
+}
+
 function renderMessage(message) {
-  const role = message.role === 'user' ? '用户' : message.role === 'assistant' ? 'Agent' : message.role;
+  const role = message.role === 'user' ? tr('role.user') : message.role === 'assistant' ? tr('role.assistant') : message.role;
   const body = el('div', { class: 'message-body' });
 
   if (message.thinking) {
     body.append(detailsBlock(
-      '思考',
+      tr('message.thinking'),
       markdownBlock(message.thinking, 'thinking'),
       message.thinking
     ));
@@ -398,14 +493,14 @@ function renderMessage(message) {
   }
   for (const call of message.toolCalls ?? []) {
     body.append(detailsBlock(
-      `工具调用 · ${call.name ?? 'unknown'}`,
+      tr('message.toolCall', { name: call.name ?? 'unknown' }),
       el('pre', { class: 'tool', text: jsonText(call.input) }),
       jsonText(call.input)
     ));
   }
   for (const result of message.toolResults ?? []) {
     body.append(detailsBlock(
-      `工具结果${result.isError ? ' · 错误' : ''}`,
+      `${tr('message.toolResult')}${result.isError ? tr('message.errorSuffix') : ''}`,
       renderToolResult(result),
       () => toolResultPlainText(result)
     ));
@@ -415,7 +510,7 @@ function renderMessage(message) {
     el('div', { class: 'message-head' }, [
       el('span', { class: 'badge', text: role }),
       el('span', { class: 'message-time', text: message.at ? formatTime(message.at) : '' }),
-      copyButton(() => messagePlainText(message))
+      copyButton(() => messagePlainText(message, messageLabels()))
     ]),
     body
   ]);
@@ -425,18 +520,18 @@ function renderDetail(detail) {
   const session = detail.session;
   detailEl.replaceChildren(
     el('header', { class: 'detail-head' }, [
-      el('h2', { text: session.title }),
+      el('h2', { text: sessionTitle(session) }),
       el('div', { class: 'detail-meta' }, [
         el('span', { class: 'agent-label' }, [
           agentIcon(session.agent),
           el('span', { text: session.agent })
         ]),
-        el('span', { text: session.chatId ? `chat ${session.chatId}` : '本地会话' }),
-        el('span', { text: `更新于 ${formatTime(session.updatedAt)}` }),
-        el('span', { text: `${session.messageCount} 条消息` }),
-        session.archived ? el('span', { class: 'badge', text: '已归档' }) : null
+        el('span', { text: session.chatId ? tr('detail.chat', { chatId: session.chatId }) : tr('detail.localSession') }),
+        el('span', { text: tr('detail.updatedAt', { time: formatTime(session.updatedAt) }) }),
+        el('span', { text: tr('detail.messageCount', { count: session.messageCount }) }),
+        session.archived ? el('span', { class: 'badge', text: tr('detail.archived') }) : null
       ]),
-      el('div', { class: 'detail-cwd', text: session.cwd || '（无 cwd）' })
+      el('div', { class: 'detail-cwd', text: session.cwd || tr('detail.noCwd') })
     ]),
     el('div', { class: 'messages' }, detail.messages.map(renderMessage))
   );
@@ -444,20 +539,23 @@ function renderDetail(detail) {
 
 async function openSession(key) {
   state.selected = key;
+  state.view = 'chat';
   state.detailSignature = null;
+  renderView();
   writeHash();
   renderList();
 
-  detailEl.replaceChildren(el('p', { class: 'empty', text: '加载中…' }));
+  detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.loading') }));
   await refreshDetail();
 }
 
 async function refreshDetail() {
+  if (state.view === 'settings') return;
   if (!state.selected) return;
   try {
     const res = await fetch(`/api/session?key=${encodeURIComponent(state.selected)}`);
     if (res.status === 404) {
-      detailEl.replaceChildren(el('p', { class: 'empty', text: '会话不存在或已被移除' }));
+      detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.notFound') }));
       return;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -467,9 +565,285 @@ async function refreshDetail() {
     state.detailSignature = signature;
     renderDetail(detail);
   } catch (error) {
-    detailEl.replaceChildren(el('p', { class: 'error', text: `加载详情失败：${error.message}` }));
+    detailEl.replaceChildren(el('p', { class: 'error', text: tr('detail.loadFailed', { message: error.message }) }));
   }
 }
+
+const ROOT_LABELS = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  dsh: 'DeepSeek Harness',
+  workbuddy: 'WorkBuddy',
+  larkChannel: 'Lark Channel'
+};
+
+let settingsStatusTimer;
+
+function switchControl(checked, onchange, { disabled = false, label = '' } = {}) {
+  return el('input', {
+    class: 'switch',
+    type: 'checkbox',
+    role: 'switch',
+    checked: checked ? '' : undefined,
+    disabled: disabled ? '' : undefined,
+    'aria-label': label,
+    onchange
+  });
+}
+
+function settingRow(label, hint, control, icon = null) {
+  return el('label', { class: 'setting-row' }, [
+    el('div', { class: 'setting-main' }, [
+      icon ? el('span', { class: 'setting-icon' }, [icon]) : null,
+      el('div', { class: 'setting-copy' }, [
+        el('span', { class: 'setting-label', text: label }),
+        hint ? el('span', { class: 'setting-hint', text: hint }) : null
+      ])
+    ]),
+    control
+  ]);
+}
+
+function pathRow(label, value) {
+  const text = value || tr('settings.rootUnavailable');
+  return el('div', { class: 'path-row' }, [
+    el('div', { class: 'path-copy' }, [
+      el('span', { class: 'path-label', text: label }),
+      el('code', { class: 'path-value', title: text, text })
+    ]),
+    value ? copyButton(value) : null
+  ]);
+}
+
+function settingsSection(title, hint, children) {
+  return el('section', { class: 'settings-card' }, [
+    el('h3', { text: title }),
+    hint ? el('p', { class: 'settings-card-hint', text: hint }) : null,
+    el('div', { class: 'settings-rows' }, children)
+  ]);
+}
+
+function setSettingsStatus(text, kind = '') {
+  state.settingsStatus = text;
+  state.settingsStatusKind = kind;
+  const node = settingsEl.querySelector('.settings-status');
+  if (!node) return;
+  node.textContent = text;
+  node.className = `settings-status${kind ? ` ${kind}` : ''}`;
+}
+
+function toggleAgent(id, enabled) {
+  const info = state.settingsInfo;
+  if (!info || state.settingsSaving) return;
+  const current = info.settings.enabledAgents;
+  const next = enabled ? [...current, id] : current.filter(agent => agent !== id);
+  const order = info.agents.map(agent => agent.id);
+  next.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  if (!next.length) {
+    renderSettings();
+    return;
+  }
+  updateSettings({ enabledAgents: next });
+}
+
+function languageRow(settings, disabled) {
+  const select = el('select', {
+    class: 'filter-select language-select',
+    'aria-label': tr('settings.language'),
+    disabled: disabled ? '' : undefined,
+    onchange: (event) => updateSettings({ language: event.target.value })
+  });
+  for (const [value, key] of [
+    ['auto', 'settings.languageAuto'],
+    ['zh', 'settings.languageZh'],
+    ['en', 'settings.languageEn']
+  ]) {
+    select.append(el('option', {
+      value,
+      selected: settings.language === value ? '' : undefined,
+      text: tr(key)
+    }));
+  }
+  return settingRow(tr('settings.language'), tr('settings.languageHint'), select);
+}
+
+function renderSettings() {
+  const info = state.settingsInfo;
+  if (!info) {
+    settingsEl.replaceChildren(el('p', { class: 'empty', text: tr('settings.loading') }));
+    return;
+  }
+
+  const { settings, agents, dbPath, roots } = info;
+  const saving = state.settingsSaving;
+  const visibilityHint = saving ? tr('settings.saving') : '';
+
+  const agentRows = agents.map(agent => {
+    const enabled = settings.enabledAgents.includes(agent.id);
+    const lastEnabled = enabled && settings.enabledAgents.length === 1;
+    return settingRow(
+      agent.name,
+      lastEnabled ? tr('settings.agentLast')
+        : enabled ? tr('settings.agentEnabled') : tr('settings.agentDisabled'),
+      switchControl(enabled, (event) => toggleAgent(agent.id, event.target.checked), {
+        disabled: saving || lastEnabled,
+        label: tr('settings.enableAgent', { name: agent.name })
+      }),
+      agentIcon(agent.id)
+    );
+  });
+
+  const rootRows = Object.entries(roots || {}).map(([key, value]) =>
+    pathRow(key === 'larkChannel' ? tr('settings.larkChannel') : (ROOT_LABELS[key] ?? key), value)
+  );
+
+  settingsEl.replaceChildren(
+    el('div', { class: 'settings-inner' }, [
+      el('header', { class: 'settings-head' }, [
+        el('div', {}, [
+          el('p', { class: 'settings-eyebrow', text: tr('settings.eyebrow') }),
+          el('h2', { text: tr('settings.title') })
+        ]),
+        el('button', { class: 'settings-back', type: 'button', onclick: closeSettings }, [
+          el('span', { class: 'back-icon', html: CHEVRON_ICON }),
+          tr('settings.back')
+        ])
+      ]),
+      el('p', { class: 'settings-intro', text: tr('settings.intro') }),
+      settingsSection(tr('settings.language'), '', [
+        languageRow(settings, saving)
+      ]),
+      settingsSection(tr('settings.display'), visibilityHint || tr('settings.displayHint'), [
+        settingRow(
+          tr('settings.showEmpty'),
+          tr('settings.showEmptyHint'),
+          switchControl(settings.showEmptySessions, (event) =>
+            updateSettings({ showEmptySessions: event.target.checked }), {
+            disabled: saving,
+            label: tr('settings.showEmpty')
+          })
+        ),
+        settingRow(
+          tr('settings.showTemp'),
+          tr('settings.showTempHint'),
+          switchControl(settings.showTempSessions, (event) =>
+            updateSettings({ showTempSessions: event.target.checked }), {
+            disabled: saving,
+            label: tr('settings.showTemp')
+          })
+        )
+      ]),
+      settingsSection(tr('settings.agents'), tr('settings.agentsHint'), agentRows),
+      settingsSection(tr('settings.data'), tr('settings.dataHint'), [
+        pathRow(tr('settings.database'), dbPath),
+        ...rootRows
+      ]),
+      el('p', {
+        class: `settings-status${state.settingsStatusKind ? ` ${state.settingsStatusKind}` : ''}`,
+        role: 'status',
+        text: state.settingsStatus
+      })
+    ])
+  );
+}
+
+async function fetchSettings() {
+  const res = await fetch('/api/settings');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function adoptSettings(info) {
+  state.settingsInfo = info;
+  state.languagePreference = info.settings.language ?? 'auto';
+  applyLanguage();
+}
+
+async function hydrateSettings() {
+  try {
+    adoptSettings(await fetchSettings());
+  } catch {
+    // 语言回退到系统设置，其余设置保持默认。
+  }
+}
+
+async function loadSettings() {
+  try {
+    adoptSettings(await fetchSettings());
+    state.settingsStatus = '';
+    state.settingsStatusKind = '';
+    renderSettings();
+  } catch (error) {
+    settingsEl.replaceChildren(el('p', {
+      class: 'error',
+      text: tr('settings.loadFailed', { message: error.message })
+    }));
+  }
+}
+
+function openSettings() {
+  state.view = 'settings';
+  writeHash();
+  renderView();
+  settingsEl.scrollTop = 0;
+  if (state.settingsInfo) renderSettings();
+  else loadSettings();
+}
+
+function closeSettings() {
+  state.view = 'chat';
+  writeHash();
+  renderView();
+  if (!state.selected) {
+    detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.pick') }));
+  } else {
+    refreshDetail();
+  }
+}
+
+async function updateSettings(patch) {
+  if (state.settingsSaving) return;
+  state.settingsSaving = true;
+  clearTimeout(settingsStatusTimer);
+  setSettingsStatus(tr('settings.saving'));
+  renderSettings();
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+
+    state.settingsInfo = { ...state.settingsInfo, settings: body.settings };
+    state.settingsSaving = false;
+    state.languagePreference = body.settings.language ?? 'auto';
+    if (state.agent !== 'all' && !body.settings.enabledAgents.includes(state.agent)) {
+      state.agent = 'all';
+    }
+    state.listSignature = null;
+    writeHash();
+    applyLanguage();
+    setSettingsStatus(tr('settings.saved'), 'ok');
+    loadSessions();
+
+    clearTimeout(settingsStatusTimer);
+    settingsStatusTimer = setTimeout(() => {
+      setSettingsStatus('');
+    }, 2000);
+  } catch (error) {
+    state.settingsSaving = false;
+    renderSettings();
+    setSettingsStatus(tr('settings.saveFailed', { message: error.message }), 'error');
+  }
+}
+
+settingsButtonEl.addEventListener('click', () => {
+  if (state.view === 'settings') closeSettings();
+  else openSettings();
+});
 
 let searchTimer;
 searchEl.addEventListener('input', () => {
@@ -481,9 +855,17 @@ searchEl.addEventListener('input', () => {
   }, 300);
 });
 
-readHash();
-loadSessions();
-if (state.selected) openSession(state.selected);
+async function init() {
+  readHash();
+  await hydrateSettings();
+  applyLanguage();
+  renderView();
+  loadSessions();
+  if (state.view === 'settings') loadSettings();
+  else if (state.selected) openSession(state.selected);
 
-setInterval(loadSessions, 5000);
-setInterval(refreshDetail, 3000);
+  setInterval(loadSessions, 5000);
+  setInterval(refreshDetail, 3000);
+}
+
+init();

@@ -41,6 +41,18 @@ test('messagePlainText 空消息返回空字符串，纯正文不产生多余空
   assert.equal(messagePlainText({ text: '只有正文' }), '只有正文');
 });
 
+test('messagePlainText 可接受本地化标签', () => {
+  const text = messagePlainText({
+    toolCalls: [{ name: 'Read', input: 'x' }],
+    toolResults: [{ output: 'y', isError: true }]
+  }, {
+    toolCall: name => `Tool call · ${name}`,
+    toolResult: 'Tool result',
+    errorSuffix: ' · error'
+  });
+  assert.equal(text, 'Tool call · Read\nx\n\nTool result · error\ny');
+});
+
 test('toolResultPlainText 原样保留字符串，格式化对象，空值返回空字符串', () => {
   assert.equal(toolResultPlainText({ output: 'raw output' }), 'raw output');
   assert.equal(toolResultPlainText({ output: { a: 1 } }), '{\n  "a": 1\n}');
