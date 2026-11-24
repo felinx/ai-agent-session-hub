@@ -12,6 +12,7 @@ const state = {
   view: 'chat',
   lang: resolveLanguage('auto', navigator.language),
   languagePreference: 'auto',
+  systemLanguage: navigator.language,
   sessions: [],
   facets: { agents: [], chats: [], cwds: [] },
   health: null,
@@ -240,7 +241,7 @@ function scrollDetailTo(where, behavior) {
 }
 
 function applyLanguage() {
-  state.lang = resolveLanguage(state.languagePreference, navigator.language);
+  state.lang = resolveLanguage(state.languagePreference, state.systemLanguage);
   document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'en';
   document.title = tr('app.title');
   searchEl.placeholder = tr('search.placeholder');
@@ -805,6 +806,7 @@ async function fetchSettings() {
 function adoptSettings(info) {
   state.settingsInfo = info;
   state.languagePreference = info.settings.language ?? 'auto';
+  state.systemLanguage = info.systemLanguage || navigator.language;
   applyLanguage();
 }
 

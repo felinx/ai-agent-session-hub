@@ -218,6 +218,14 @@ export function resolveLanguage(preference, systemLanguage = '') {
   return system.startsWith('zh') ? 'zh' : 'en';
 }
 
+export function detectSystemLanguage() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || '';
+  } catch {
+    return '';
+  }
+}
+
 export function t(lang, key, params = {}) {
   const catalog = MESSAGES[lang] ?? MESSAGES.en;
   const template = catalog[key] ?? MESSAGES.en[key] ?? key;

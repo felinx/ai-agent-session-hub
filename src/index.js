@@ -7,7 +7,7 @@ import { openDb, initSchema, clearAll } from './db.js';
 import { syncOnce } from './sync.js';
 import { createServer } from './server.js';
 import { getSettings } from './settings.js';
-import { formatWarning, resolveLanguage, t } from '../public/i18n.js';
+import { formatWarning, resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
 
 const config = loadConfig();
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -22,12 +22,8 @@ if (config.rebuild) clearAll(db);
 const state = { scanning: false, lastSyncAt: null, warnings: [] };
 const server = createServer({ db, state, publicDir, config });
 
-function systemLanguage() {
-  return process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '';
-}
-
 function currentLanguage() {
-  return resolveLanguage(getSettings(db).language, systemLanguage());
+  return resolveLanguage(getSettings(db).language, detectSystemLanguage());
 }
 
 let syncing = false;

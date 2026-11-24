@@ -5,7 +5,7 @@ import {
   listSessions, getSession, getFacets, countVisibleSessions
 } from './db.js';
 import { getSettings, saveSettings, SUPPORTED_AGENTS } from './settings.js';
-import { t, resolveLanguage, formatWarning } from '../public/i18n.js';
+import { t, resolveLanguage, formatWarning, detectSystemLanguage } from '../public/i18n.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -75,12 +75,9 @@ function readJsonBody(req, maxBytes = 65536) {
   });
 }
 
-function acceptLanguage(header) {
-  const first = String(header ?? '').split(',')[0]?.trim() ?? '';
-  return first.split(';')[0]?.trim() ?? '';
-}
-
-export function createServer({ db, state, publicDir, config }) {
+export function createServer({
+  db, state, publicDir, config, systemLanguage = detectSystemLanguage()
+}) {
   const rootDir = path.resolve(publicDir);
 
   function visibility(includeHidden = false) {
@@ -95,10 +92,10 @@ export function createServer({ db, state, publicDir, config }) {
     };
   }
 
-  function resolveRequestLanguage(req) {
+  function resolveRequestLanguage() {
     const preference = getSettings(db).language;
     if (preference === 'zh' || preference === 'en') return preference;
-    return resolveLanguage('auto', acceptLanguage(req.headers['accept-language']));
+    return resolveLanguage('auto', systemLanguage);
   }
 
   function sendError(res, status, lang, key, params) {
@@ -106,7 +103,7 @@ export function createServer({ db, state, publicDir, config }) {
   }
 
   return http.createServer(async (req, res) => {
-    const lang = resolveRequestLanguage(req);
+    const lang = resolveRequestLanguage();
     try {
       if (req.method !== 'GET' && req.method !== 'PUT') {
         return sendError(res, 405, lang, 'error.methodNotAllowed');
@@ -151,7 +148,8 @@ export function createServer({ db, state, publicDir, config }) {
           settings,
           agents: SUPPORTED_AGENTS,
           dbPath: config?.dbPath ?? null,
-          roots: config?.roots ?? {}
+          roots: config?.roots ?? {},
+          systemLanguage
         });
       }
 

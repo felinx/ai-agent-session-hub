@@ -29,7 +29,7 @@ function seed(db) {
   ], { mtimeMs: 200, size: 1 });
 }
 
-async function makeServer(extraSeed, extraFiles = {}) {
+async function makeServer(extraSeed, extraFiles = {}, options = {}) {
   const db = openDb(':memory:');
   initSchema(db);
   seed(db);
@@ -49,7 +49,10 @@ async function makeServer(extraSeed, extraFiles = {}) {
       workbuddy: '/data/workbuddy', larkChannel: '/data/lark'
     }
   };
-  const server = createServer({ db, state, publicDir, config });
+  const server = createServer({
+    db, state, publicDir, config,
+    systemLanguage: options.systemLanguage ?? 'en-US'
+  });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
 
@@ -144,6 +147,7 @@ test('GET /api/settings 返回设置、Agent 元数据与数据文件路径', as
   );
   assert.equal(body.dbPath, '/tmp/session-hub-test/hub.db');
   assert.equal(body.roots.workbuddy, '/data/workbuddy');
+  assert.equal(body.systemLanguage, 'en-US');
 });
 
 test('PUT /api/settings 保存显示开关并立即影响列表、facets 与 health', async (t) => {
@@ -219,29 +223,29 @@ test('界面语言设置持久化，并影响 API 错误与警告语言', async 
   assert.equal(enError.code, 'error.keyRequired');
 });
 
-test('未设置语言时按 Accept-Language 协商，警告随之翻译', async (t) => {
-  const s = await makeServer();
-  t.after(() => s.close());
+test('未设置语言时跟随服务器系统语言，Accept-Language 不覆盖', async (t) => {
+  const zhServer = await makeServer(undefined, {}, { systemLanguage: 'zh-CN' });
+  t.after(() => zhServer.close());
 
-  const zh = await (await fetch(s.base + '/api/session', {
-    headers: { 'accept-language': 'zh-CN,zh;q=0.9' }
+  const zh = await (await fetch(zhServer.base + '/api/session', {
+    headers: { 'accept-language': 'en-US,en;q=0.9' }
   })).json();
   assert.equal(zh.error, '缺少 key 参数');
 
-  const en = await (await fetch(s.base + '/api/session', {
-    headers: { 'accept-language': 'en-US,en;q=0.9' }
+  zhServer.state.warnings = [{ code: 'sourceRootUnavailable', params: { path: '/gone' } }];
+  const zhHealth = await (await fetch(zhServer.base + '/api/health')).json();
+  assert.deepEqual(zhHealth.warnings, ['来源根目录不可用：/gone']);
+
+  const enServer = await makeServer(undefined, {}, { systemLanguage: 'en-US' });
+  t.after(() => enServer.close());
+
+  const en = await (await fetch(enServer.base + '/api/session', {
+    headers: { 'accept-language': 'zh-CN,zh;q=0.9' }
   })).json();
   assert.equal(en.error, 'Missing key parameter');
 
-  s.state.warnings = [{ code: 'sourceRootUnavailable', params: { path: '/gone' } }];
-  const zhHealth = await (await fetch(s.base + '/api/health', {
-    headers: { 'accept-language': 'zh-CN' }
-  })).json();
-  assert.deepEqual(zhHealth.warnings, ['来源根目录不可用：/gone']);
-
-  const enHealth = await (await fetch(s.base + '/api/health', {
-    headers: { 'accept-language': 'en-US' }
-  })).json();
+  enServer.state.warnings = [{ code: 'sourceRootUnavailable', params: { path: '/gone' } }];
+  const enHealth = await (await fetch(enServer.base + '/api/health')).json();
   assert.deepEqual(enHealth.warnings, ['Source root unavailable: /gone']);
 });
 
@@ -249,15 +253,13 @@ test('非法设置返回翻译后的错误与稳定错误码', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
-  const zh = await (await putJson(s.base + '/api/settings', { unknown: true }, {
-    'accept-language': 'zh-CN'
-  })).json();
+  await putJson(s.base + '/api/settings', { language: 'zh' });
+  const zh = await (await putJson(s.base + '/api/settings', { unknown: true })).json();
   assert.equal(zh.error, '未知设置项：unknown');
   assert.equal(zh.code, 'settings.error.unknownKey');
 
-  const en = await (await putJson(s.base + '/api/settings', { language: 'fr' }, {
-    'accept-language': 'en-US'
-  })).json();
+  await putJson(s.base + '/api/settings', { language: 'en' });
+  const en = await (await putJson(s.base + '/api/settings', { language: 'fr' })).json();
   assert.equal(en.error, 'Setting language is invalid');
   assert.equal(en.code, 'settings.error.language');
 });
