@@ -477,6 +477,7 @@ Response:
 - `resync` — true when `since` is older than the oldest retained event; the consumer
   should re-run the bootstrap flow. `cursor` is still returned so the consumer can resume
   from the present.
+- `scope` — optional subscription scope; see [Subscription scope](#subscription-scope).
 
 A simple consumer loop:
 
@@ -512,6 +513,47 @@ data: {"v":1,"seq":1288,"type":"session.updated", …}
 - Per-connection queue is bounded by count (default 1000) and bytes (for example 32 MB,
   since `turn.completed` can be large). On overflow the server sends `event: resync` with
   the latest cursor and closes the connection; it never blocks the sync loop.
+
+### Subscription scope
+
+Both transports accept one optional `scope` selector. It answers "which sessions is this
+consumer interested in?" and is applied before paging, so the cursor only advances over
+events the consumer can see.
+
+| `scope` value | Delivered events |
+| --- | --- |
+| omitted or `all` | Everything, including `sync.completed`. |
+| `agent:<name>` | Events for sessions of that agent (`claude`, `codex`, `dsh`, `workbuddy`). |
+| `project:<cwd>` | Events for sessions whose working directory is exactly `<cwd>`. |
+| `session:<id>` | Events for one session, by internal id (`session.id`, 8 hex characters). |
+
+```http
+GET /api/events?scope=project:/Users/me/app&wait=25
+GET /api/events/stream?scope=session:9f3c2a1e
+```
+
+- The project selector is an exact match on the session's `cwd`, the same key the UI uses
+  to group projects. Subdirectory sessions are separate projects; subscribe to each one,
+  or use `agent`/`all` when a wider net is wanted.
+- The session selector accepts the internal id shown in the UI and in `session.id`
+  payloads. A full session key (`claude:9f3c…`) is also accepted for convenience.
+- `sync.completed` belongs to no session, so it is delivered only for `scope=all`. This
+  keeps a scoped feed free of unrelated global noise; a consumer that needs a "pass
+  finished" signal should subscribe to `all` or to `type=sync.completed`.
+- One scope per subscription. To watch several projects or sessions, open one long poll
+  or SSE connection per scope; they share the same cursor semantics.
+- `agent` and `type` remain narrower filters and combine with `scope` (intersection). For
+  example, `scope=project:/app&type=turn.completed` delivers only completed turns in that
+  project. `scope=agent:claude` is equivalent to `agent=claude` for session events, but
+  the scope form is preferred for new consumers because it is explicit about intent.
+- An unknown selector kind or an empty value is `400` with `{error, code:
+  "error.invalidScope"}`.
+
+To filter without scanning payload JSON, every event row stores the scope columns at
+append time: `session_id` (derived from the session key) and `cwd` (the session's working
+directory). Session and turn events fill both; `sync.completed` leaves them null. The
+table predates these columns, so `initSchema` adds them in place and backfills
+`session_id` from `session_key` and `cwd` from the `sessions` table for retained rows.
 
 ### Upstream additions for bootstrap
 

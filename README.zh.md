@@ -142,6 +142,7 @@ node bin/session-hub.js doctor    # 检查 Node、本地副本、日志、来源
 
 - `GET /api/events?since=<seq>&wait=25` — 长轮询读取变更事件。`since` 是排他游标；省略（或传 `0`）从仍保留的最早事件开始，传 `now`（或 `-1`）只接收未来的事件。`limit` 默认 200（上限 1000），`maxBytes` 默认 8 MB，`wait` 默认 0（上限 25 秒）。`agent`、`type` 接受逗号分隔的过滤条件。响应为 `{events, cursor, hasMore, resync}`。
 - `GET /api/events/stream?since=<seq>` — 相同过滤条件下的 Server-Sent Events。每帧带 `id:`（事件 seq）、`event:`（事件类型）与 `data:`（事件体）。断线重连时客户端通过 `Last-Event-ID` 从最后一条已收事件之后继续；服务端每 15 秒发送一次心跳注释。积压超过 1000 条事件或 32 MB 的慢客户端会收到 `event: resync`，连接随即关闭。
+- 两种传输都接受 `scope` 指定订阅范围：`all`（默认）、`agent:claude`、`project:/Users/me/app`（精确匹配 cwd）、`session:9f3c2a1e`（内部 session ID，也可直接传完整 session key）。限定范围的订阅不会收到不属于任何会话的 `sync.completed`。范围无效时返回 `400` 与错误码 `error.invalidScope`。
 - `GET /api/status` 与 `GET /api/sessions` 返回 `lastEventSeq`，消费者可以先取快照，再从该游标开始订阅，避免重放首次全量同步。
 
 事件按单调递增的 `seq` 排序，至少投递一次；消费者按 `seq` 去重。事件类型包括 `session.created`、`session.updated`、`session.removed`、`turn.completed`，以及每轮同步一条 `sync.completed`。`turn.completed` 带上最关键的两条消息全文——人的提问与 Agent 的最终回答——中间的过程性思考、工具调用与工具输出不进入事件流。`GET /api/turn?key=…&turn=…` 返回同一 turn 对象及其计数；`GET /api/turn/messages?key=…&turn=…` 通过 `after`、`limit`、`maxBytes` 分页读取整轮原文。
