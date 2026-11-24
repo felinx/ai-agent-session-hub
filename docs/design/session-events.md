@@ -86,6 +86,9 @@ Every event has a small, versioned envelope:
   - `sync.completed` — one event per sync pass, carrying `added`, `updated`, `removed`,
     and the resulting `seq`. Lets consumers batch work per sync instead of reacting to
     every row.
+  - `turn.completed` — one human request and the agent's full answer are finished; see
+    [Turn completion](#turn-completion). This is the event to react to when a consumer
+    cares about a settled answer rather than an intermediate file change.
 - `session.summary` — the same one-line summary the CLI log already prints
   (`latestSummary()` in `src/sync.js`, limited to 80 characters via `oneLine`).
 - `session.lastMessageSeq` — the sequence number of the newest message in the copy, so a
@@ -97,6 +100,173 @@ Every event has a small, versioned envelope:
 
 Events contain no message bodies and no tool output. A consumer that needs content calls
 `GET /api/session?key=…` or the existing list endpoint.
+
+## Turn completion
+
+A `session.updated` event only says "the copy changed". During one question the file
+changes many times — reasoning, tool calls, tool results, intermediate assistant text —
+so a consumer reacting to `updated` sees the middle of a turn, not the answer. This
+section defines a turn, how each source marks its end, and the `turn.completed` event.
+
+### What a turn is
+
+- It starts with a real human prompt. Tool-result-only user entries, `developer`
+  messages, injected context, compaction summaries, and subagent sidechains are not
+  prompts.
+- It includes everything the agent did for that prompt: reasoning, tool calls and
+  results, and any intermediate assistant messages.
+- It ends when the agent stops for that prompt — a final answer, an error, a block, or
+  an abort. Intermediate tool use is not the end.
+- `turnSeq` is a per-session ordinal assigned by the hub (`1..N`, persisted), so
+  consumers do not depend on source-specific ids. `turnId` is the source's own id where
+  one exists.
+
+### Signals per source
+
+| Source | Turn start | Turn end | Status |
+| --- | --- | --- | --- |
+| Claude | User entry whose content is not only `tool_result`, not synthetic, not `isSidechain` | Assistant entry with a terminal `message.stop_reason`: `end_turn`, `stop_sequence`, or `max_tokens`. `tool_use` is **not** terminal. One message is split across up to 8 lines sharing `message.id`; group by id and read the terminal reason from the last group | `completed` / `truncated` (`max_tokens`) |
+| Codex | `event_msg` with `payload.type === "task_started"` | `event_msg` with `payload.type === "task_complete"`, carrying `turn_id` and `last_agent_message`; pair by `turn_id` | `completed`; a new `task_started` without a preceding `task_complete` closes the old turn as `interrupted` |
+| dsh | `turn/start` (`data.turn`) | `turn/end`; `data.reason.kind` is `completed`, `blocked`, `aborted`, or `error` | mapped one-to-one |
+| WorkBuddy | `message` with `role: "user"` and `providerData.startsNewUserRequest !== false` | No native marker — inferred, see below | `completed` / `aborted` / `interrupted` |
+
+Status normalization: `completed` means the agent produced its final answer;
+`truncated` means it stopped at a length limit; `error`, `blocked`, `aborted` are
+source-reported failures; `interrupted` means the hub inferred that the process or the
+user stopped the turn without a terminal marker.
+
+### WorkBuddy (inferred)
+
+WorkBuddy persists no turn-complete record. `turnComplete` and `task_completed` exist
+only in the app's i18n and telemetry, never in the JSONL transcript. The transcript is
+append-only, and one model step writes, in order: optional `reasoning`, the assistant
+`message` text, then any `function_call` entries — all sharing the same
+`providerData.messageId`; `function_call_result` follows after execution.
+
+Findings across 71 sessions (2026-11-24):
+
+- 6156 of 6632 completed assistant text messages are mid-turn; 5917 of those have
+  `function_call` entries with the same `messageId`, and those calls are always written
+  **after** the text.
+- Every completed assistant message *without* a same-`messageId` `function_call` is
+  followed only by a compaction summary or the next prompt — never by more work in the
+  same turn.
+- A turn's `providerData.conversationRequestId` is constant within the turn and changes
+  at each `startsNewUserRequest`.
+- Aborts end with an assistant message whose `status` is `incomplete` and whose
+  `providerData.error.message` is, for example, `Interrupted by user`. A killed process
+  can instead leave an unresolved `function_call` as the last entry.
+
+Inference rules:
+
+1. Split at `startsNewUserRequest` messages; ignore compaction entries
+   (`isCompactInternal`, `isCompacted`, `<cb_summary>` / `<conversation_history_summary>`
+   user messages) and `skipRun` / `isMeta` records.
+2. A turn is terminal when its last visible item is an assistant `message` with
+   `status: "completed"` and the turn contains no `function_call` with the same
+   `messageId`.
+3. Do not emit immediately: the text and its tool calls are separate appends, so require
+   the file to be unchanged for at least one sync interval (5s) before closing the turn.
+   Without this, a sync that lands between the two appends would close a turn that has
+   pending tool calls.
+4. `status: "incomplete"` plus `providerData.error` ends the turn as `aborted`.
+5. A new prompt while the previous turn has no terminal item, or EOF with an unresolved
+   `function_call`, ends the previous turn as `interrupted`.
+
+Events derived this way carry `signal: "inferred"`; the other three sources carry
+`signal: "native"`. Consumers that need certainty can ignore inferred completions, at
+the cost of WorkBuddy support.
+
+### Event shape
+
+```json
+{
+  "v": 1,
+  "seq": 1290,
+  "type": "turn.completed",
+  "at": 1764000000000,
+  "turn": {
+    "sessionKey": "claude:9f3c2a1e-…",
+    "turnSeq": 7,
+    "turnId": "msg_92a1c48ce0df4841886a1411ba00f385",
+    "status": "completed",
+    "signal": "native",
+    "startedAt": 1763999800000,
+    "endedAt": 1763999998000,
+    "promptSeq": 41,
+    "finalSeq": 47,
+    "summary": "检查了行数与章节结构，与原文一致。"
+  }
+}
+```
+
+- `promptSeq` / `finalSeq` are message sequence numbers, so a consumer can fetch exactly
+  the turn's range (or just the final message) through the existing session endpoint.
+- `summary` is the same 80-character one-line summary used elsewhere; never the full
+  answer.
+- `turnId` is the terminal `message.id` for Claude, the native `turn_id` for Codex and
+  dsh, and `providerData.conversationRequestId` for WorkBuddy.
+- A turn appears in the feed only when it is terminal. In-progress turns are represented
+  solely by the session's `session.updated` events.
+
+### Storage and emission
+
+```sql
+CREATE TABLE IF NOT EXISTS turns (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
+  turn_seq    INTEGER NOT NULL,
+  turn_id     TEXT,
+  status      TEXT NOT NULL,
+  signal      TEXT NOT NULL,
+  started_at  INTEGER,
+  ended_at    INTEGER,
+  prompt_seq  INTEGER,
+  final_seq   INTEGER,
+  UNIQUE(session_key, turn_seq)
+);
+CREATE INDEX IF NOT EXISTS idx_turns_session_seq ON turns(session_key, turn_seq);
+```
+
+- Turns are written inside the same transaction as the session, exactly like messages.
+  A failing parse or write leaves neither.
+- Re-parsing a file rewrites its turns. To avoid re-emitting `turn.completed` for old
+  turns on every sync, the transaction selects the existing `(session_key, turn_id)`
+  pairs first and appends an event only for newly inserted turns.
+- If a turn was inferred and later evidence changes its status (for example an inferred
+  `completed` becomes `interrupted`), the hub appends another `turn.completed` with the
+  same `turnId`. Consumers dedupe by `sessionKey + turnId` and keep the event with the
+  higher `seq`; dedupe by `seq` alone is not enough for corrections.
+- Within one sync pass the order is: session event(s), then `turn.completed` for newly
+  closed turns, then `sync.completed`.
+- Historical data: turns are derived at parse time. Existing rows have none until the
+  file changes; a `--rebuild` backfills every session once.
+
+### Consuming it
+
+```sh
+cursor=0
+while :; do
+  body=$(curl -s "http://127.0.0.1:7317/api/events?since=$cursor&type=turn.completed&wait=25")
+  cursor=$(printf '%s' "$body" | jq -r .cursor)
+  printf '%s' "$body" | jq -c '.events[] | select(.turn.status == "completed")'
+done
+```
+
+For SSE, listen with `addEventListener('turn.completed', …)`. Fetch content with
+`GET /api/session?key=…` and slice `messages` by `promptSeq..finalSeq`.
+
+### Limits
+
+- WorkBuddy completion is inferred, not reported: the 5s settle window adds latency, and
+  a turn that is interrupted without a new prompt stays open until quiescence or a new
+  prompt.
+- Turn completion is not success. Check `status` before doing work that assumes an
+  answer.
+- A long tool call produces no completion event until it returns; the feed is a change
+  feed, not a progress feed.
+- If a source rewrites or compacts history, `turnSeq` is recomputed; `turnId` remains
+  the stable key.
 
 ## Storage
 
@@ -257,9 +427,10 @@ A consumer that does not care about existing sessions can subscribe with
 
 | File | Change |
 | --- | --- |
-| `src/schema.sql` | `events` table and index |
-| `src/db.js` | `appendEvent()` (called inside the existing `transaction()` in `replaceSession`), `eventsSince()`, `pruneEvents()`; removal events from `pruneMissing()` |
-| `src/sync.js` | Extend change records with `key`, `project`, `updatedAt`, `lastMessageSeq`; append `sync.completed` at the end of `syncOnce()` |
+| `src/schema.sql` | `events` table and index; `turns` table and index |
+| `src/sources/claude.js`, `codex.js`, `dsh.js`, `workbuddy.js` | Return turn boundaries alongside messages: terminal `stop_reason` grouped by `message.id`, paired Codex `task_started`/`task_complete`, dsh `turn/start`/`turn/end`, and the WorkBuddy inference rule |
+| `src/db.js` | `appendEvent()` (called inside the existing `transaction()` in `replaceSession`), `eventsSince()`, `pruneEvents()`; persist derived turns inside the same transaction and emit only newly inserted turns; removal events from `pruneMissing()` |
+| `src/sync.js` | Extend change records with `key`, `project`, `updatedAt`, `lastMessageSeq`; pass parsed turns through; close turns left open by a new prompt or EOF; append `sync.completed` at the end of `syncOnce()` |
 | `src/server.js` | `/api/events` and `/api/events/stream` handlers, `lastEventSeq` in `/api/status` and `/api/sessions` responses, SSE heartbeat/queue helper |
 | `src/hub.js` | Expose the current event head (or read `max(seq)` when serializing status) |
 | `src/events.js` (new) | Event envelope construction/serialization and cursor helpers, so the wire format is unit-testable without HTTP |
@@ -284,10 +455,21 @@ TDD, per the project convention:
   concurrent sync.
 - Restart: events survive, cursor continues monotonically.
 - Retention pruning does not break `seq` monotonicity.
+- Turn boundaries per source: Claude `end_turn` vs `tool_use` and split `message.id`
+  lines; Codex `task_started`/`task_complete` pairing; all four dsh `reason.kind` values;
+  WorkBuddy completion, `Interrupted by user`, unresolved `function_call`, and compaction
+  user messages that must not start a turn.
+- WorkBuddy inference does not close a turn when a text message and its same-`messageId`
+  `function_call` are written 1ms apart and the sync lands between them.
+- Re-parsing an unchanged file appends no second `turn.completed`; a status correction
+  appends a higher `seq` with the same `turnId`.
+- A new human prompt after a turn left open by a killed process closes it as
+  `interrupted` before the new turn's events.
 
 ## Phases
 
-- **P1** — event table, cursor API, SSE stream, `lastEventSeq` bootstrap, filters, retention.
+- **P1** — event table, cursor API, SSE stream, `lastEventSeq` bootstrap, filters,
+  retention, turn detection and `turn.completed` events for all four sources.
 - **P2** — `session-hub mcp` (stdio) exposing `list_sessions`, `get_session`, and
   `wait_for_changes` as tools on top of the same cursor model.
 - **P3** — optional `~/.session-hub/events.jsonl` append-only outbox for `tail -f`-style
@@ -307,3 +489,7 @@ TDD, per the project convention:
   need to move ahead of P1 polish.
 - **Retention window.** 7 days / 50,000 events is a starting point; revisit once real
   event rates are measured.
+- **WorkBuddy inference.** WorkBuddy has no native completion marker, so its
+  `turn.completed` events are inferred from append order plus a settle window. A future
+  WorkBuddy version may add an explicit record; revisit then and switch those events to
+  `signal: "native"`. Until then, consumers must be able to live with an inferred signal.
