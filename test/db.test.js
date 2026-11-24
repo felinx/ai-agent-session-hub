@@ -21,7 +21,7 @@ function freshDb() {
   return db;
 }
 
-test('replaceSession 写入会话、消息、工具与 sync_state', () => {
+test('replaceSession writes the session, messages, tools, and sync_state', () => {
   const db = freshDb();
   const messages = [
     { role: 'user', at: 1, text: 'hi' },
@@ -43,7 +43,7 @@ test('replaceSession 写入会话、消息、工具与 sync_state', () => {
   db.close();
 });
 
-test('重新 replace 会替换旧消息且不留孤儿', () => {
+test('replacing again swaps old messages without leaving orphans', () => {
   const db = freshDb();
   replaceSession(db, makeSession(), [
     { role: 'user', at: 1, text: 'hi' },
@@ -66,7 +66,7 @@ test('重新 replace 会替换旧消息且不留孤儿', () => {
   db.close();
 });
 
-test('pruneMissing 删除不在 keepPaths 的会话与 sync_state，并返回被删会话摘要', () => {
+test('pruneMissing deletes sessions and sync_state not in keepPaths and returns summaries of deleted sessions', () => {
   const db = freshDb();
   replaceSession(db, makeSession(), [{ role: 'user', text: 'hi' }], { mtimeMs: 10, size: 100 });
 
@@ -79,7 +79,7 @@ test('pruneMissing 删除不在 keepPaths 的会话与 sync_state，并返回被
   db.close();
 });
 
-test('超大工具结果可入库并读回', () => {
+test('very large tool results can be stored and read back', () => {
   const db = freshDb();
   const big = 'x'.repeat(300 * 1024);
   replaceSession(db, makeSession({ messageCount: 1 }), [
@@ -95,7 +95,7 @@ test('超大工具结果可入库并读回', () => {
   db.close();
 });
 
-test('同 key 不同路径重写时清理旧路径的 sync_state', () => {
+test('rewriting the same key with a different path clears sync_state for the old path', () => {
   const db = freshDb();
   replaceSession(db, makeSession({ sourcePath: '/p/a.jsonl' }), [{ role: 'user', text: 'a' }], { mtimeMs: 1, size: 1 });
   replaceSession(db, makeSession({ sourcePath: '/p/b.jsonl' }), [{ role: 'user', text: 'b' }], { mtimeMs: 2, size: 2 });
@@ -106,7 +106,7 @@ test('同 key 不同路径重写时清理旧路径的 sync_state', () => {
   db.close();
 });
 
-test('自定义数据库路径不修改已存在目录权限，数据库文件 0600', () => {
+test('custom database path leaves existing directory permissions unchanged and creates the database file with mode 0600', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-perm-'));
   const dir = path.join(root, 'nested');
   mkdirSync(dir, { recursive: true, mode: 0o755 });

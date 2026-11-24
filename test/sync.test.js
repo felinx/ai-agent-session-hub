@@ -67,14 +67,14 @@ function bumpMtime(file) {
   utimesSync(file, next, next);
 }
 
-test('首次同步写入四源会话', async () => {
+test('first sync writes sessions from all four sources', async () => {
   const { db, config } = setup();
   const r = await syncOnce(db, config);
   assert.equal(r.added, 4);
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 4);
 });
 
-test('二次同步未变化时全部 unchanged', async () => {
+test('second sync with no changes reports everything as unchanged', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
   const r = await syncOnce(db, config);
@@ -84,7 +84,7 @@ test('二次同步未变化时全部 unchanged', async () => {
   );
 });
 
-test('旧版本归一的 WorkBuddy 会话会重新解析并恢复原始 cwd', async () => {
+test('WorkBuddy sessions with legacy normalized cwd are reparsed and their original cwd restored', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
   db.prepare('UPDATE sessions SET cwd = ? WHERE agent = ?')
@@ -96,7 +96,7 @@ test('旧版本归一的 WorkBuddy 会话会重新解析并恢复原始 cwd', as
   assert.equal(row.cwd, '/tmp/workbuddy');
 });
 
-test('追加内容只更新对应会话', async () => {
+test('appended content updates only the matching session', async () => {
   const { db, config, files } = setup();
   await syncOnce(db, config);
 
@@ -113,7 +113,7 @@ test('追加内容只更新对应会话', async () => {
   assert.equal(row.message_count, 3);
 });
 
-test('删除源文件后清理会话', async () => {
+test('deleting a source file prunes its session', async () => {
   const { db, config, files } = setup();
   await syncOnce(db, config);
   unlinkSync(files.codexFile);
@@ -122,7 +122,7 @@ test('删除源文件后清理会话', async () => {
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 3);
 });
 
-test('源根目录不可读时产生 warning 且不误删', async () => {
+test('an unreadable source root produces a warning without deleting sessions', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
 
@@ -139,7 +139,7 @@ test('源根目录不可读时产生 warning 且不误删', async () => {
   }
 });
 
-test('仅标题元数据变化也会刷新', async () => {
+test('title-only metadata changes also trigger an update', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
 
@@ -153,7 +153,7 @@ test('仅标题元数据变化也会刷新', async () => {
   assert.equal(row.title, '新标题');
 });
 
-test('仅 catalog 变化也会刷新 chatId', async () => {
+test('catalog-only changes also refresh chatId', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
 
@@ -170,7 +170,7 @@ test('仅 catalog 变化也会刷新 chatId', async () => {
   assert.equal(row.chat_id, 'oc_NEW');
 });
 
-test('源根目录不存在时仍完成并产生 warning', async () => {
+test('nonexistent source roots still complete sync and produce warnings', async () => {
   const { db } = setup();
   const config = {
     roots: {
@@ -186,7 +186,7 @@ test('源根目录不存在时仍完成并产生 warning', async () => {
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 0);
 });
 
-test('源根目录缺失时不会误删已有会话', async () => {
+test('a missing source root does not delete existing sessions', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
 
@@ -196,7 +196,7 @@ test('源根目录缺失时不会误删已有会话', async () => {
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 4);
 });
 
-test('坏文件不阻塞其它会话且保留旧数据', async () => {
+test('a bad file does not block other sessions and preserves old data', async () => {
   const { db, config, files } = setup();
   await syncOnce(db, config);
 
@@ -211,7 +211,7 @@ test('坏文件不阻塞其它会话且保留旧数据', async () => {
   assert.equal(row.title, '扩展这个库');
 });
 
-test('关闭 Agent 后停止同步并清理其会话，重新开启可恢复', async () => {
+test('disabling an agent stops syncing and prunes its sessions, and re-enabling restores them', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 4);
@@ -230,7 +230,7 @@ test('关闭 Agent 后停止同步并清理其会话，重新开启可恢复', a
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 4);
 });
 
-test('catalog 缺失时 chatId 为 null', async () => {
+test('chatId is null when the catalog is missing', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
   assert.ok(listSessions(db, {}).every(s => s.chatId === null));

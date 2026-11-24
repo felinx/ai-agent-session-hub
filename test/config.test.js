@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 
-test('默认值', () => {
+test('default values', () => {
   const c = loadConfig({}, []);
   assert.equal(c.host, '127.0.0.1');
   assert.equal(c.port, 7317);
@@ -17,7 +17,7 @@ test('默认值', () => {
   assert.equal(c.roots.larkChannel, path.join(os.homedir(), '.lark-channel'));
 });
 
-test('环境变量覆盖与 --rebuild', () => {
+test('environment variable overrides and --rebuild', () => {
   const c = loadConfig({
     SESSION_HUB_HOST: '0.0.0.0',
     SESSION_HUB_PORT: '9000',
@@ -34,6 +34,6 @@ test('环境变量覆盖与 --rebuild', () => {
   });
 });
 
-test('非法端口回退默认值', () => {
+test('invalid port falls back to the default', () => {
   assert.equal(loadConfig({ SESSION_HUB_PORT: 'abc' }, []).port, 7317);
 });

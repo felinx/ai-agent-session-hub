@@ -9,7 +9,7 @@ function freshDb() {
   return db;
 }
 
-test('默认设置：隐藏空会话和临时会话，启用全部 Agent，语言跟随系统', () => {
+test('default settings hide empty and temp sessions, enable all agents, and follow the system language', () => {
   const db = freshDb();
   assert.deepEqual(getSettings(db), {
     showEmptySessions: false,
@@ -20,7 +20,7 @@ test('默认设置：隐藏空会话和临时会话，启用全部 Agent，语�
   db.close();
 });
 
-test('部分更新持久化，不影响其它设置', () => {
+test('partial updates persist without affecting other settings', () => {
   const db = freshDb();
   assert.equal(saveSettings(db, { showEmptySessions: true }).showEmptySessions, true);
   assert.deepEqual(getSettings(db), {
@@ -40,7 +40,7 @@ test('部分更新持久化，不影响其它设置', () => {
   db.close();
 });
 
-test('拒绝非法设置值并返回稳定错误码', () => {
+test('invalid setting values are rejected with stable error codes', () => {
   const db = freshDb();
   const cases = [
     [null, 'settings.error.invalidFormat'],

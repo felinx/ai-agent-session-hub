@@ -38,7 +38,7 @@ function freshDb() {
   return db;
 }
 
-test('listSessions 过滤、排序与 limit', () => {
+test('listSessions filters, sorts, and applies limit', () => {
   const db = freshDb();
   assert.deepEqual(listSessions(db, {}).map(s => s.key), ['claude:a', 'codex:b', 'dsh:c']);
   assert.deepEqual(listSessions(db, { agent: 'codex' }).map(s => s.key), ['codex:b']);
@@ -52,7 +52,7 @@ test('listSessions 过滤、排序与 limit', () => {
   db.close();
 });
 
-test('getSession 组装消息、工具与 archived 布尔值', () => {
+test('getSession assembles messages, tools, and the archived boolean', () => {
   const db = freshDb();
   const detail = getSession(db, 'claude:a');
   assert.equal(detail.session.key, 'claude:a');
@@ -66,7 +66,7 @@ test('getSession 组装消息、工具与 archived 布尔值', () => {
   db.close();
 });
 
-test('getFacets 统计三个维度', () => {
+test('getFacets counts all three dimensions', () => {
   const db = freshDb();
   const facets = getFacets(db);
   assert.deepEqual(facets.agents.map(a => a.agent).sort(), ['claude', 'codex', 'dsh']);
@@ -76,7 +76,7 @@ test('getFacets 统计三个维度', () => {
   db.close();
 });
 
-test('默认隐藏 0 消息会话与 /tmp 临时目录会话', () => {
+test('zero-message sessions and /tmp temp directory sessions are hidden by default', () => {
   const db = freshDb();
   replaceSession(db, session('claude:empty', 'claude', 'empty', 'oc_E', '/p1', 900, 0), [], { mtimeMs: 900, size: 1 });
   replaceSession(db, session('claude:tmp', 'claude', 'tmp', 'oc_T', '/tmp', 800), [{ role: 'user', text: 'x' }], { mtimeMs: 800, size: 1 });
@@ -115,7 +115,7 @@ test('默认隐藏 0 消息会话与 /tmp 临时目录会话', () => {
   db.close();
 });
 
-test('按启用的 Agent 集合过滤列表与 facets', () => {
+test('filter the list and facets by the set of enabled agents', () => {
   const db = freshDb();
   assert.deepEqual(
     listSessions(db, { agents: ['claude', 'dsh'] }).map(s => s.key),

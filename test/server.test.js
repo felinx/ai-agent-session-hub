@@ -84,7 +84,7 @@ function putJson(url, body, headers = {}) {
   });
 }
 
-test('GET /api/sessions 返回列表与 facets', async (t) => {
+test('GET /api/sessions returns the list and facets', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -95,7 +95,7 @@ test('GET /api/sessions 返回列表与 facets', async (t) => {
   assert.ok(Array.isArray(body.facets.agents));
 });
 
-test('过滤与搜索参数生效', async (t) => {
+test('filter and search parameters take effect', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -110,7 +110,7 @@ test('过滤与搜索参数生效', async (t) => {
   assert.equal(bySince.sessions[0].key, 'claude:a');
 });
 
-test('GET /api/session 返回详情，未知 key 404', async (t) => {
+test('GET /api/session returns details and 404 for an unknown key', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -121,7 +121,7 @@ test('GET /api/session 返回详情，未知 key 404', async (t) => {
   assert.equal((await fetch(s.base + '/api/session?key=nope')).status, 404);
 });
 
-test('GET /api/health 报告状态', async (t) => {
+test('GET /api/health reports status', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -131,7 +131,7 @@ test('GET /api/health 报告状态', async (t) => {
   assert.equal(h.scanning, false);
 });
 
-test('GET /api/settings 返回设置、Agent 元数据与数据文件路径', async (t) => {
+test('GET /api/settings returns settings, agent metadata, and data file paths', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -151,7 +151,7 @@ test('GET /api/settings 返回设置、Agent 元数据与数据文件路径', as
   assert.equal(body.systemLanguage, 'en-US');
 });
 
-test('PUT /api/settings 保存显示开关并立即影响列表、facets 与 health', async (t) => {
+test('PUT /api/settings saves display toggles and immediately affects the list, facets, and health', async (t) => {
   const s = await makeServer((db) => {
     const base = { createdAt: 1, archived: 0, tokens: null, extraJson: null };
     replaceSession(db, {
@@ -180,7 +180,7 @@ test('PUT /api/settings 保存显示开关并立即影响列表、facets 与 hea
   assert.equal((await (await fetch(s.base + '/api/health')).json()).sessions, 4);
 });
 
-test('PUT /api/settings 可关闭 Agent，列表与 facets 立即过滤', async (t) => {
+test('PUT /api/settings can disable agents and immediately filters the list and facets', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -195,7 +195,7 @@ test('PUT /api/settings 可关闭 Agent，列表与 facets 立即过滤', async 
   assert.deepEqual(restored.sessions.map(session => session.key), ['claude:a', 'codex:b']);
 });
 
-test('PUT /api/settings 拒绝非法 JSON、未知键与空 Agent 集合', async (t) => {
+test('PUT /api/settings rejects invalid JSON, unknown keys, and an empty agent set', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -206,7 +206,7 @@ test('PUT /api/settings 拒绝非法 JSON、未知键与空 Agent 集合', async
   assert.equal((await fetch(s.base + '/api/sessions', { method: 'PUT' })).status, 405);
 });
 
-test('界面语言设置持久化，并影响 API 错误与警告语言', async (t) => {
+test('UI language setting persists and affects the language of API errors and warnings', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -224,7 +224,7 @@ test('界面语言设置持久化，并影响 API 错误与警告语言', async 
   assert.equal(enError.code, 'error.keyRequired');
 });
 
-test('未设置语言时跟随服务器系统语言，Accept-Language 不覆盖', async (t) => {
+test('language follows the server system language when unset, and Accept-Language does not override it', async (t) => {
   const zhServer = await makeServer(undefined, {}, { systemLanguage: 'zh-CN' });
   t.after(() => zhServer.close());
 
@@ -250,7 +250,7 @@ test('未设置语言时跟随服务器系统语言，Accept-Language 不覆盖'
   assert.deepEqual(enHealth.warnings, ['Source root unavailable: /gone']);
 });
 
-test('非法设置返回翻译后的错误与稳定错误码', async (t) => {
+test('invalid settings return translated errors and stable error codes', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -265,7 +265,7 @@ test('非法设置返回翻译后的错误与稳定错误码', async (t) => {
   assert.equal(en.code, 'settings.error.language');
 });
 
-test('默认隐藏空会话与临时目录，includeHidden=1 可包含', async (t) => {
+test('empty sessions and temp directories are hidden by default, and includeHidden=1 includes them', async (t) => {
   const s = await makeServer((db) => {
     const base = {
       createdAt: 1, archived: 0, tokens: null, extraJson: null
@@ -293,7 +293,7 @@ test('默认隐藏空会话与临时目录，includeHidden=1 可包含', async (
   assert.equal(health.sessions, 2);
 });
 
-test('拒绝非本机 Host 并附带安全响应头', async (t) => {
+test('rejects non-local Host headers and includes security response headers', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
   const { hostname, port } = new URL(s.base);
@@ -307,7 +307,7 @@ test('拒绝非本机 Host 并附带安全响应头', async (t) => {
   assert.equal(ok.headers['x-content-type-options'], 'nosniff');
 });
 
-test('静态文件与路径穿越防护', async (t) => {
+test('static file serving and path traversal protection', async (t) => {
   const s = await makeServer();
   t.after(() => s.close());
 
@@ -320,7 +320,7 @@ test('静态文件与路径穿越防护', async (t) => {
   assert.equal((await fetch(s.base + '/' + encodeURIComponent('../package.json'))).status, 404);
 });
 
-test('静态 PNG 以 image/png 返回', async (t) => {
+test('static PNG is returned as image/png', async (t) => {
   const magic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const s = await makeServer(undefined, { 'logo.png': magic });
   t.after(() => s.close());
@@ -338,7 +338,7 @@ function seedSessionWithCwd(db, key, cwd) {
   }, [], { mtimeMs: 1, size: 1 });
 }
 
-test('GET /api/session/asset 只返回会话目录内的图片', async (t) => {
+test('GET /api/session/asset only returns images inside the session directory', async (t) => {
   const { mkdirSync, symlinkSync } = await import('node:fs');
   const dir = mkdtempSync(path.join(tmpdir(), 'sh-asset-'));
   const outside = mkdtempSync(path.join(tmpdir(), 'sh-asset-out-'));
@@ -382,7 +382,7 @@ test('GET /api/session/asset 只返回会话目录内的图片', async (t) => {
   assert.equal((await fetch(s.base + '/api/session/asset?key=nope&path=a.png')).status, 404);
 });
 
-test('首页引用的静态资源自动带内容版本号', async (t) => {
+test('static assets referenced by the index page automatically get content version hashes', async (t) => {
   const s = await makeServer(undefined, {
     'index.html': '<!doctype html>'
       + '<link rel="stylesheet" href="/style.css">'
@@ -409,7 +409,7 @@ test('首页引用的静态资源自动带内容版本号', async (t) => {
   assert.equal(await css.text(), 'body{color:red}');
 });
 
-test('静态资源内容变化后版本号随之变化', async (t) => {
+test('static asset version hashes change when file content changes', async (t) => {
   const s = await makeServer(undefined, {
     'index.html': '<link rel="stylesheet" href="/style.css">',
     'style.css': 'body{color:red}'
@@ -427,7 +427,7 @@ test('静态资源内容变化后版本号随之变化', async (t) => {
   assert.notEqual(await versionOf(), before);
 });
 
-test('GET /api/file 以只读方式返回本地文件内容', async (t) => {
+test('GET /api/file returns local file contents read-only', async (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'sh-file-'));
   const textFile = path.join(dir, 'notes.md');
   writeFileSync(textFile, 'line1\nline2\n');

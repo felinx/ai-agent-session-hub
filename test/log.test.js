@@ -4,22 +4,22 @@ import { stamp, formatDuration, formatClock, hasChanges, describeSync } from '..
 
 const base = { added: 0, updated: 0, unchanged: 4, removed: 0, changes: [], total: 4, byAgent: [] };
 
-test('stamp 输出本地时间 YYYY-MM-DD HH:mm:ss', () => {
+test('stamp outputs local time as YYYY-MM-DD HH:mm:ss', () => {
   assert.equal(stamp(new Date(2026, 10, 24, 9, 5, 3)), '[2026-11-24 09:05:03]');
 });
 
-test('formatDuration 区分毫秒、秒、分钟', () => {
+test('formatDuration distinguishes milliseconds, seconds, and minutes', () => {
   assert.equal(formatDuration(820), '820ms');
   assert.equal(formatDuration(1420), '1.4s');
   assert.equal(formatDuration(125000), '2m5s');
 });
 
-test('formatClock 输出到分钟的本地时间，空值显示占位', () => {
+test('formatClock outputs local time to the minute and shows a placeholder for empty values', () => {
   assert.equal(formatClock(new Date(2026, 10, 24, 13, 8, 40).getTime()), '2026-11-24 13:08');
   assert.equal(formatClock(null), '—');
 });
 
-test('hasChanges 只在新增/更新/移除非零时为真', () => {
+test('hasChanges is true only when added, updated, or removed counts are nonzero', () => {
   assert.equal(hasChanges(base), false);
   assert.equal(hasChanges({ ...base, added: 1 }), true);
   assert.equal(hasChanges({ ...base, updated: 1 }), true);
@@ -27,7 +27,7 @@ test('hasChanges 只在新增/更新/移除非零时为真', () => {
   assert.equal(hasChanges({ ...base, unchanged: 9 }), false);
 });
 
-test('describeSync 汇总一行并逐条列出会话变化，带时间', () => {
+test('describeSync summarizes on one line and lists each session change with a timestamp', () => {
   const now = new Date(2026, 10, 24, 13, 20, 5);
   const lines = describeSync({
     added: 1,
@@ -57,12 +57,12 @@ test('describeSync 汇总一行并逐条列出会话变化，带时间', () => {
   );
 });
 
-test('describeSync 无变化时只输出汇总行', () => {
+test('describeSync outputs only the summary line when there are no changes', () => {
   const lines = describeSync(base, 'en', { now: new Date(2026, 10, 24, 13, 20, 5), elapsedMs: 120 });
   assert.deepEqual(lines, ['[2026-11-24 13:20:05] sync done · 120ms · 0 added, 0 updated, 0 removed · 4 sessions']);
 });
 
-test('describeSync 移除的会话不给消息数与更新时间', () => {
+test('describeSync omits message count and update time for removed sessions', () => {
   const lines = describeSync({
     ...base,
     removed: 1,
@@ -71,7 +71,7 @@ test('describeSync 移除的会话不给消息数与更新时间', () => {
   assert.equal(lines[1], '[2026-11-24 13:20:05]   - [codex] 旧实验 · 已从来源移除');
 });
 
-test('describeSync 限制明细条数并提示剩余变化', () => {
+test('describeSync limits detail lines and reports remaining changes', () => {
   const changes = Array.from({ length: 5 }, (_, i) => ({
     kind: 'added', agent: 'claude', title: `会话 ${i}`, messages: 1, updatedAt: Date.now()
   }));
