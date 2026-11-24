@@ -90,6 +90,9 @@ npm start -- --rebuild
 - 项目默认全部收起；「项目」「最近」区块与每个项目的展开/收起状态保存在浏览器 localStorage，刷新页面或下次打开时保持
 - 默认隐藏 0 条消息的空会话，以及 cwd 位于 `/tmp`、`/private/tmp`（含子目录）的临时会话；API 加 `includeHidden=1` 可查看
 - 侧边栏底部「设置」页：可分别开关空会话与临时目录会话、启用/停用四个 Agent、切换界面语言、查看本地数据库与各来源目录；停用 Agent 后会停止同步并移除其本地副本，重新启用会再次读取源文件
+- 设置旁的「状态」页按 Agent 汇总会话数、消息数、最近同步时间，并展示最近一条会话的内部 ID 与最新消息的单行摘要；点击即可打开该会话
+- 每个会话都有稳定的内部 **session id**（由会话 key 派生的 8 位十六进制串，`--rebuild` 后不变），详情页头部会展示
+- 后台同步只为发生变化的会话各打一行日志：`+ [agent] <session-id> <摘要>`，会话从来源消失时打一行删除记录；没有变化时不输出，整体情况看「状态」页
 - 界面与错误提示支持**中文和英文**。默认跟随系统语言，可在「设置 → 界面语言」中改为跟随系统、中文或 English
 - 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
 - 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）；消息、思考与工具内容按 Markdown 渲染，JSON 内容自动缩进格式化
@@ -124,7 +127,9 @@ src/
   config.js          环境变量与默认路径
   db.js              SQLite schema、会话写入、查询、清理、FTS
   settings.js        本地设置的读取、校验与保存
-  normalize.js       文本/时间归一化
+  normalize.js       文本/时间归一化、单行摘要
+  session-id.js      由会话 key 派生的稳定内部 session id
+  log.js             带时间戳的同步变更日志
   sync.js            增量同步编排
   server.js          HTTP API + 静态文件（图片/文件接口、资源版本号）
   index.js           入口与后台同步
@@ -139,7 +144,7 @@ public/              前端看板
   format.js          Markdown 子集渲染（先转义再格式化）
   links.js           本地文件链接识别与查看页地址
   images.js          会话图片路径解析为图片接口地址
-  app.js             会话列表、详情、设置
+  app.js             会话列表、详情、设置、状态
   viewer.html/.js    只读文件查看器（带行号）
   icons/             四个 Agent 的图标
 ```

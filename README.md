@@ -90,6 +90,9 @@ npm start -- --rebuild
 - All projects start collapsed. The open/closed state of the **Projects** and **Recent** sections and of each project is stored in browser localStorage, so it survives reloads and future visits
 - Sessions with 0 messages and temporary sessions whose cwd is under `/tmp` or `/private/tmp` (including subdirectories) are hidden by default; pass `includeHidden=1` to the API to see them
 - A **Settings** page at the bottom of the sidebar lets you toggle empty and temporary sessions independently, enable or disable each of the four agents, switch the interface language, and inspect the local database and source directories. Disabling an agent stops syncing and removes its local copy; re-enabling it reads the source files again
+- A **Status** page next to Settings summarises every agent: session and message counts, the latest sync time, and for the newest session its internal id and a one-line summary of the latest message. Clicking it opens that session
+- Every session carries a stable internal **session id** (8 hex characters derived from the session key, so it survives `--rebuild`); the detail header shows it next to the agent
+- The background sync logs one line per changed session, `+ [agent] <session-id> <summary>`, and one line when a session disappears. Syncs that changed nothing print nothing — the Status page covers the overall picture
 - The interface and all error messages are available in **Chinese and English**. The language follows your system language by default; you can override it in **Settings → Interface language** (System / 中文 / English)
 - Full-text search (SQLite FTS5 trigram; automatically falls back to `LIKE` for queries shorter than 3 characters)
 - Session detail: message order, thinking, tool calls, and tool results (collapsible). Messages, thinking, and tool content are rendered as Markdown, with automatic JSON indentation/formatting
@@ -124,7 +127,9 @@ src/
   config.js          Environment variables and default paths
   db.js              SQLite schema, session writes, queries, pruning, FTS
   settings.js        Read, validate, and persist local settings
-  normalize.js       Text/time normalization
+  normalize.js       Text/time normalization, one-line summaries
+  session-id.js      Stable internal session id derived from the session key
+  log.js             Timestamped sync change log lines
   sync.js            Incremental sync orchestration
   server.js          HTTP API + static files (image and file endpoints, asset versions)
   index.js           Entry point and background sync
@@ -139,7 +144,7 @@ public/              Frontend dashboard
   format.js          Markdown subset renderer (escapes first, then formats)
   links.js           Local-file link detection and viewer URLs
   images.js          Resolves session image paths to the asset endpoint
-  app.js             Session list, detail, settings
+  app.js             Session list, detail, settings, status
   viewer.html/.js    Read-only file viewer with line numbers
   icons/             Icons for the four agents
 ```
