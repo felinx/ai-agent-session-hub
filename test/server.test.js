@@ -4,7 +4,7 @@ import http from 'node:http';
 import { mkdtempSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { openDb, initSchema, replaceSession } from '../src/db.js';
+import { openDb, initSchema, replaceSession, appendEvent } from '../src/db.js';
 import { createServer } from '../src/server.js';
 
 function seed(db) {
@@ -51,7 +51,8 @@ async function makeServer(extraSeed, extraFiles = {}, options = {}) {
   };
   const server = createServer({
     db, state, publicDir, config,
-    systemLanguage: options.systemLanguage ?? 'en-US'
+    systemLanguage: options.systemLanguage ?? 'en-US',
+    ...options
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
@@ -60,6 +61,7 @@ async function makeServer(extraSeed, extraFiles = {}, options = {}) {
     base: `http://127.0.0.1:${port}`,
     publicDir,
     state,
+    db,
     close: () => new Promise(resolve => server.close(() => { db.close(); resolve(); }))
   };
 }
@@ -482,4 +484,204 @@ test('GET /api/status reports scan state and per-agent statistics', async (t) =>
   assert.equal(claude.latest.key, 'claude:a');
   assert.match(claude.latest.id, /^[0-9a-f]{8}$/);
   assert.equal(claude.latest.summary, '我看一下');
+});
+
+function seedEvents(db) {
+  appendEvent(db, {
+    type: 'session.updated', sessionKey: 'claude:a', agent: 'claude', at: 10,
+    payload: { session: { key: 'claude:a' } }
+  });
+  appendEvent(db, {
+    type: 'turn.completed', sessionKey: 'codex:b', agent: 'codex', at: 20,
+    payload: { turn: { turnSeq: 1, status: 'completed' } }
+  });
+  appendEvent(db, {
+    type: 'sync.completed', at: 30, payload: { added: 0, updated: 0, removed: 0 }
+  });
+}
+
+function openStream(url, headers = {}) {
+  const target = new URL(url);
+  let buffer = '';
+  const request = http.request({
+    hostname: target.hostname,
+    port: target.port,
+    path: target.pathname + target.search,
+    headers: { accept: 'text/event-stream', ...headers }
+  }, res => {
+    res.setEncoding('utf8');
+    res.on('data', chunk => { buffer += chunk; });
+  });
+  request.on('error', () => {});
+  request.end();
+  return {
+    get buffer() { return buffer; },
+    close() { request.destroy(); }
+  };
+}
+
+async function untilStream(stream, predicate, timeoutMs = 2000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate(stream.buffer)) return stream.buffer;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error(`stream timeout; buffer: ${JSON.stringify(stream.buffer)}`);
+}
+
+test('GET /api/events pages from a cursor and reports hasMore', async (t) => {
+  const s = await makeServer(seedEvents);
+  t.after(() => s.close());
+
+  const first = await (await fetch(s.base + '/api/events?since=0&limit=2')).json();
+  assert.deepEqual(first.events.map(event => event.seq), [1, 2]);
+  assert.equal(first.cursor, 2);
+  assert.equal(first.hasMore, true);
+  assert.equal(first.resync, false);
+
+  const second = await (await fetch(s.base + '/api/events?since=2')).json();
+  assert.deepEqual(second.events.map(event => event.seq), [3]);
+  assert.equal(second.cursor, 3);
+  assert.equal(second.hasMore, false);
+});
+
+test('GET /api/events filters by agent and type', async (t) => {
+  const s = await makeServer(seedEvents);
+  t.after(() => s.close());
+
+  const byAgent = await (await fetch(s.base + '/api/events?agent=claude')).json();
+  assert.deepEqual(byAgent.events.map(event => event.type), ['session.updated']);
+
+  const byType = await (await fetch(s.base + '/api/events?type=sync.completed')).json();
+  assert.deepEqual(byType.events.map(event => event.seq), [3]);
+
+  const both = await (await fetch(s.base + '/api/events?agent=claude&type=sync.completed')).json();
+  assert.deepEqual(both.events, []);
+});
+
+test('GET /api/events rejects an invalid cursor and flags a cursor past the head', async (t) => {
+  const s = await makeServer(seedEvents);
+  t.after(() => s.close());
+
+  const invalid = await fetch(s.base + '/api/events?since=abc');
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).code, 'error.invalidCursor');
+
+  const ahead = await (await fetch(s.base + '/api/events?since=999')).json();
+  assert.equal(ahead.resync, true);
+  assert.equal(ahead.cursor, 3);
+
+  const future = await (await fetch(s.base + '/api/events?since=now')).json();
+  assert.deepEqual(future.events, []);
+  assert.equal(future.cursor, 3);
+});
+
+test('GET /api/events long-polls until a matching event arrives', async (t) => {
+  const s = await makeServer(seedEvents);
+  t.after(() => s.close());
+
+  const started = Date.now();
+  const pending = fetch(s.base + '/api/events?since=3&wait=5&agent=claude');
+  setTimeout(() => appendEvent(s.db, {
+    type: 'session.updated', sessionKey: 'claude:a', agent: 'claude', at: 40,
+    payload: { session: { key: 'claude:a' } }
+  }), 300);
+
+  const body = await (await pending).json();
+  assert.deepEqual(body.events.map(event => event.seq), [4]);
+  assert.ok(Date.now() - started < 4000);
+});
+
+test('status and session listings expose lastEventSeq for bootstrap', async (t) => {
+  const s = await makeServer(seedEvents);
+  t.after(() => s.close());
+
+  assert.equal((await (await fetch(s.base + '/api/status')).json()).lastEventSeq, 3);
+  assert.equal((await (await fetch(s.base + '/api/sessions')).json()).lastEventSeq, 3);
+});
+
+test('GET /api/events/stream frames events and resumes from Last-Event-ID', async (t) => {
+  const s = await makeServer(seedEvents);
+  const streams = [];
+  t.after(() => {
+    for (const stream of streams) stream.close();
+    return s.close();
+  });
+
+  const stream = openStream(s.base + '/api/events/stream?since=0');
+  streams.push(stream);
+  await untilStream(stream, text => text.includes('id: 3'));
+  const text = stream.buffer;
+  assert.match(text, /^id: 1\nevent: session\.updated\ndata: \{.*"seq":1.*\}\n\n/m);
+  assert.match(text, /event: turn\.completed/);
+  assert.match(text, /event: sync\.completed/);
+
+  stream.close();
+
+  const resumed = openStream(s.base + '/api/events/stream?since=0', { 'Last-Event-ID': '1' });
+  streams.push(resumed);
+  await untilStream(resumed, body => body.includes('id: 3'));
+  assert.equal(resumed.buffer.includes('id: 1\n'), false);
+  assert.match(resumed.buffer, /^id: 2\n/m);
+});
+
+test('GET /api/events/stream emits heartbeat comments', async (t) => {
+  const s = await makeServer(null, {}, { sseHeartbeatMs: 40 });
+  const stream = openStream(s.base + '/api/events/stream?since=now');
+  t.after(() => { stream.close(); return s.close(); });
+
+  await untilStream(stream, text => text.includes(': heartbeat'));
+});
+
+test('GET /api/turn and /api/turn/messages expose turn metadata and content', async (t) => {
+  const s = await makeServer((db) => {
+    replaceSession(db, {
+      key: 'claude:a', agent: 'claude', nativeId: 'a', title: '构建', cwd: '/p1',
+      chatId: 'oc_A', createdAt: 1, updatedAt: 300, sourcePath: '/x/a.jsonl',
+      archived: 0, messageCount: 3, tokens: null, extraJson: null
+    }, [
+      { role: 'user', text: '把日志改一下' },
+      {
+        role: 'assistant', text: '先看看',
+        toolCalls: [{ id: 't1', name: 'Bash', input: { command: 'ls' } }]
+      },
+      { role: 'assistant', text: '已经改完' }
+    ], { mtimeMs: 300, size: 1 }, {
+      turns: [{
+        turnId: 'msg_1', status: 'completed', signal: 'native',
+        startedAt: 10, endedAt: 30, promptIndex: 0, finalIndex: 2
+      }]
+    });
+  });
+  t.after(() => s.close());
+
+  const turnRes = await fetch(s.base + '/api/turn?key=claude:a&turn=1');
+  assert.equal(turnRes.status, 200);
+  const turn = await turnRes.json();
+  assert.equal(turn.turn.prompt.text, '把日志改一下');
+  assert.equal(turn.turn.final.text, '已经改完');
+  assert.equal(turn.turn.status, 'completed');
+  assert.equal(turn.messageCount, 3);
+  assert.equal(turn.toolCallCount, 1);
+
+  const whole = await (await fetch(s.base + '/api/turn/messages?key=claude:a&turn=1')).json();
+  assert.deepEqual(whole.messages.map(message => message.seq), [0, 1, 2]);
+  assert.equal(whole.hasMore, false);
+  assert.equal(whole.messages[1].toolCalls[0].name, 'Bash');
+
+  const middle = await (await fetch(
+    s.base + '/api/turn/messages?key=claude:a&turn=1&after=0'
+  )).json();
+  assert.deepEqual(middle.messages.map(message => message.seq), [1, 2]);
+
+  const paged = await (await fetch(
+    s.base + '/api/turn/messages?key=claude:a&turn=1&after=0&limit=1'
+  )).json();
+  assert.deepEqual(paged.messages.map(message => message.seq), [1]);
+  assert.equal(paged.hasMore, true);
+  assert.equal(paged.nextAfter, 1);
+
+  assert.equal((await fetch(s.base + '/api/turn?key=nope&turn=1')).status, 404);
+  assert.equal((await fetch(s.base + '/api/turn?key=claude:a&turn=9')).status, 404);
+  assert.equal((await fetch(s.base + '/api/turn/messages?key=nope&turn=1')).status, 404);
 });

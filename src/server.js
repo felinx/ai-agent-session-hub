@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import { readFile, realpath, stat, open } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  listSessions, getSession, getSessionCwd, getFacets, countVisibleSessions, getAgentStats
+  listSessions, getSession, getSessionCwd, getFacets, countVisibleSessions, getAgentStats,
+  eventsSince, getLastEventSeq, getTurn, getTurnMessages
 } from './db.js';
+import { serializeEvent, resolveSince } from './events.js';
 import { getSettings, saveSettings, SUPPORTED_AGENTS } from './settings.js';
 import { t, resolveLanguage, formatWarning, detectSystemLanguage } from '../public/i18n.js';
 
@@ -109,6 +111,37 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Comma-separated query parameter; an empty value means "no filter".
+function parseFilterList(value) {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const items = value.split(',').map(item => item.trim()).filter(Boolean);
+  return items.length ? items : null;
+}
+
+function positiveInt(value, fallback, cap) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, cap);
+}
+
+function nonNegativeInt(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+const EVENT_LIMIT_MAX = 1000;
+const EVENT_BYTES_DEFAULT = 8 * 1024 * 1024;
+const EVENT_BYTES_MAX = 64 * 1024 * 1024;
+const EVENT_WAIT_MAX_SECONDS = 25;
+const SSE_PAGE_LIMIT = 500;
+const SSE_QUEUE_EVENTS = 1000;
+const SSE_QUEUE_BYTES = 32 * 1024 * 1024;
+
 function readJsonBody(req, maxBytes = 65536) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -140,7 +173,8 @@ function readJsonBody(req, maxBytes = 65536) {
 }
 
 export function createServer({
-  db, state, publicDir, config, systemLanguage = detectSystemLanguage()
+  db, state, publicDir, config, systemLanguage = detectSystemLanguage(),
+  sseHeartbeatMs = 15_000, ssePollMs = 250, eventsWaitPollMs = 250
 }) {
   const rootDir = path.resolve(publicDir);
 
@@ -206,6 +240,76 @@ export function createServer({
       const version = versions.get(ref);
       return version ? `${attr}="${ref}?v=${version}"` : match;
     });
+  }
+
+  // Server-Sent Events channel. Each connection polls the event log on the main
+  // thread (no long-lived database handle) and stops as soon as the client leaves.
+  function startEventStream(req, res, { since, agents, types }) {
+    res.writeHead(200, {
+      ...SECURITY_HEADERS,
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.write(': connected\n\n');
+
+    let cursor = since;
+    let stopped = false;
+    let unflushed = 0;
+    let poller = null;
+
+    function stop() {
+      stopped = true;
+      clearInterval(heartbeat);
+      if (poller) clearInterval(poller);
+    }
+
+    function sendResync(seq) {
+      if (res.writableEnded) return;
+      res.write(`event: resync\ndata: ${JSON.stringify({ v: 1, seq, type: 'resync', resync: true })}\n\n`);
+      res.end();
+    }
+
+    function sendFrame(event) {
+      const frame = `id: ${event.seq}\nevent: ${event.type}\ndata: ${serializeEvent(event)}\n\n`;
+      if (res.write(frame)) unflushed = 0;
+      else unflushed += 1;
+      cursor = event.seq;
+    }
+
+    function poll() {
+      if (stopped || res.writableEnded) return;
+      for (;;) {
+        const page = eventsSince(db, {
+          since: cursor, limit: SSE_PAGE_LIMIT, maxBytes: EVENT_BYTES_DEFAULT, agents, types
+        });
+        if (page.resync) {
+          sendResync(page.cursor);
+          stop();
+          return;
+        }
+        for (const event of page.events) {
+          sendFrame(event);
+          if (unflushed >= SSE_QUEUE_EVENTS || res.writableLength > SSE_QUEUE_BYTES) {
+            sendResync(cursor);
+            stop();
+            return;
+          }
+        }
+        if (!page.hasMore) break;
+      }
+    }
+
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(': heartbeat\n\n');
+    }, sseHeartbeatMs);
+
+    poller = setInterval(poll, ssePollMs);
+    res.on('drain', () => { unflushed = 0; });
+    res.on('close', stop);
+    res.on('error', stop);
+    req.on('close', stop);
+    poll();
   }
 
   return http.createServer(async (req, res) => {
@@ -279,12 +383,83 @@ export function createServer({
         return sendJson(res, 200, {
           scanning: !!state?.scanning,
           lastSyncAt: state?.lastSyncAt ?? null,
+          lastEventSeq: getLastEventSeq(db),
           agents,
           totals: {
             sessions: agents.reduce((sum, row) => sum + row.sessions, 0),
             messages: agents.reduce((sum, row) => sum + row.messages, 0)
           }
         });
+      }
+
+      if (pathname === '/api/events') {
+        const params = url.searchParams;
+        const head = getLastEventSeq(db);
+        const since = resolveSince(params.get('since'), head);
+        if (since === null) return sendError(res, 400, lang, 'error.invalidCursor');
+
+        const limit = positiveInt(params.get('limit'), 200, EVENT_LIMIT_MAX);
+        const maxBytes = positiveInt(params.get('maxBytes'), EVENT_BYTES_DEFAULT, EVENT_BYTES_MAX);
+        const agents = parseFilterList(params.get('agent'));
+        const types = parseFilterList(params.get('type'));
+        const waitRaw = Number(params.get('wait'));
+        const waitSeconds = Number.isFinite(waitRaw)
+          ? Math.min(Math.max(waitRaw, 0), EVENT_WAIT_MAX_SECONDS)
+          : 0;
+        const deadline = Date.now() + waitSeconds * 1000;
+
+        const read = () => eventsSince(db, { since, limit, maxBytes, agents, types });
+        let body = read();
+        while (
+          waitSeconds > 0 && body.events.length === 0 && !body.resync &&
+          !res.writableEnded && Date.now() < deadline
+        ) {
+          await sleep(Math.min(eventsWaitPollMs, deadline - Date.now()));
+          body = read();
+        }
+        return sendJson(res, 200, body);
+      }
+
+      if (pathname === '/api/events/stream') {
+        const head = getLastEventSeq(db);
+        const lastEventId = req.headers['last-event-id'];
+        const since = resolveSince(
+          typeof lastEventId === 'string' && lastEventId !== ''
+            ? lastEventId
+            : url.searchParams.get('since'),
+          head
+        );
+        if (since === null) return sendError(res, 400, lang, 'error.invalidCursor');
+        startEventStream(req, res, {
+          since,
+          agents: parseFilterList(url.searchParams.get('agent')),
+          types: parseFilterList(url.searchParams.get('type'))
+        });
+        return;
+      }
+
+      if (pathname === '/api/turn') {
+        const key = url.searchParams.get('key');
+        if (!key) return sendError(res, 400, lang, 'error.keyRequired');
+        const turnSeq = nonNegativeInt(url.searchParams.get('turn'));
+        if (turnSeq === null) return sendError(res, 404, lang, 'error.notFound');
+        const result = getTurn(db, key, turnSeq);
+        if (!result) return sendError(res, 404, lang, 'error.notFound');
+        return sendJson(res, 200, result);
+      }
+
+      if (pathname === '/api/turn/messages') {
+        const key = url.searchParams.get('key');
+        if (!key) return sendError(res, 400, lang, 'error.keyRequired');
+        const turnSeq = nonNegativeInt(url.searchParams.get('turn'));
+        if (turnSeq === null) return sendError(res, 404, lang, 'error.notFound');
+        const result = getTurnMessages(db, key, turnSeq, {
+          after: nonNegativeInt(url.searchParams.get('after')) ?? null,
+          limit: positiveInt(url.searchParams.get('limit'), 200, 1000),
+          maxBytes: positiveInt(url.searchParams.get('maxBytes'), 2 * 1024 * 1024, EVENT_BYTES_MAX)
+        });
+        if (!result) return sendError(res, 404, lang, 'error.notFound');
+        return sendJson(res, 200, result);
       }
 
       if (pathname === '/api/file') {
@@ -322,7 +497,8 @@ export function createServer({
         });
         return sendJson(res, 200, {
           sessions,
-          facets: getFacets(db, options)
+          facets: getFacets(db, options),
+          lastEventSeq: getLastEventSeq(db)
         });
       }
 
