@@ -5,5 +5,6 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": { "node": ">=22.5" },
-  "scripts": { "start": "node src/index.js", "test": "node --test" }
+  "bin": { "session-hub": "bin/session-hub.js" },
+  "scripts": { "start": "node bin/session-hub.js run", "test": "node --test" }
 }
