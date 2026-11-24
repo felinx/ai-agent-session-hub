@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Session Hub">
+  <rect width="64" height="64" rx="15" fill="#2563eb"/>
+  <g fill="none" stroke-width="3.4" stroke-linecap="round">
+    <path d="M8 13 Q21.2 14.3 29.22 18.04" stroke="#c4b5fd"/>
+    <path d="M8 22.5 Q19.2 22.8 26.04 23.66" stroke="#6ee7b7"/>
+    <path d="M8 33.5 Q19.2 32.7 26.04 30.34" stroke="#93c5fd"/>
+    <path d="M8 45.5 Q21.2 43.1 29.22 35.96" stroke="#fcd34d"/>
+  </g>
+  <circle cx="38.5" cy="27" r="8.4" fill="#e9f0ff"/>
+  <circle cx="38.5" cy="27" r="10.6" fill="none" stroke="#ffffff" stroke-width="4.6"/>
+  <path d="M47.0 35.5 L54.4 42.9" fill="none" stroke="#ffffff" stroke-width="6.4" stroke-linecap="round"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M34.0 22.65h9" stroke="#a78bfa" stroke-width="2"/>
+    <path d="M34.0 25.55h6.5" stroke="#34d399" stroke-width="2"/>
+    <path d="M34.0 28.45h10.5" stroke="#60a5fa" stroke-width="2"/>
+    <path d="M34.0 31.35h4.8" stroke="#fbbf24" stroke-width="2"/>
+  </g>
+</svg>

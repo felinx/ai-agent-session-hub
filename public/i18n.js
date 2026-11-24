@@ -3,7 +3,7 @@ export const LANGUAGE_PREFERENCES = ['auto', ...LANGUAGES];
 
 export const MESSAGES = {
   zh: {
-    'app.title': 'Session Hub',
+    'app.title': 'Agent Session Hub',
     'common.all': '全部',
     'common.unknownTime': '未知时间',
     'common.unknown': '未知',
@@ -75,7 +75,7 @@ export const MESSAGES = {
     'settings.agentLast': '至少保留一个 Agent',
     'settings.enableAgent': '启用 {name}',
     'settings.data': '数据文件',
-    'settings.dataHint': 'Session Hub 只读取下面的源目录，并在本地 SQLite 中保存自己的结构化副本。',
+    'settings.dataHint': 'Agent Session Hub 只读取下面的源目录，并在本地 SQLite 中保存自己的结构化副本。',
     'settings.database': 'SQLite 数据库',
     'settings.language': '界面语言',
     'settings.languageHint': '默认跟随系统语言。',
@@ -111,7 +111,7 @@ export const MESSAGES = {
     'settings.error.unknownKey': '未知设置项：{key}'
   },
   en: {
-    'app.title': 'Session Hub',
+    'app.title': 'Agent Session Hub',
     'common.all': 'All',
     'common.unknownTime': 'Unknown time',
     'common.unknown': 'Unknown',
@@ -183,7 +183,7 @@ export const MESSAGES = {
     'settings.agentLast': 'Keep at least one agent enabled',
     'settings.enableAgent': 'Enable {name}',
     'settings.data': 'Data files',
-    'settings.dataHint': 'Session Hub only reads the source directories below and keeps its own structured copy in the local SQLite database.',
+    'settings.dataHint': 'Agent Session Hub only reads the source directories below and keeps its own structured copy in the local SQLite database.',
     'settings.database': 'SQLite database',
     'settings.language': 'Interface language',
     'settings.languageHint': 'Follows your system language by default.',

@@ -70,7 +70,7 @@ server.on('error', (error) => {
 });
 
 server.listen(config.port, config.host, () => {
-  console.log(`Session Hub → http://${config.host}:${config.port}`);
+  console.log(`Agent Session Hub → http://${config.host}:${config.port}`);
   console.log(t(currentLanguage(), 'server.database', { path: config.dbPath }));
   runSync();
 });
