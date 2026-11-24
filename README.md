@@ -60,11 +60,12 @@ Without a bridge nothing breaks — sessions simply show as local sessions. The 
 
 This tool **never modifies, moves, or deletes files in any source directory**, and it makes no external network calls.
 
-It only does three things:
+It only does four things:
 
 1. Reads session files under `~/.claude`, `~/.codex`, `~/.dsh`, `~/.workbuddy`, and (when present) `~/.lark-channel`;
 2. Writes parsed results into its own SQLite database at `~/.session-hub/hub.db` (directory mode 0700, database file mode 0600);
-3. Serves a local web UI and JSON API on `127.0.0.1`.
+3. Writes its own log files under `~/.session-hub/logs` (directory mode 0700, files mode 0600);
+4. Serves a local web UI and JSON API on `127.0.0.1`.
 
 Source files are only `stat`-ed and read. Incremental sync decides whether a file changed by its `mtime` + `size`.
 
@@ -76,16 +77,30 @@ Source files are only `stat`-ed and read. Incremental sync decides whether a fil
 ## Usage
 
 ```bash
-npm start
+npm start               # run the hub in the foreground
+npm start -- --rebuild  # same, rebuilding the local copy first
 ```
 
 Open <http://127.0.0.1:7317>. The first start syncs immediately, then syncs incrementally every 5 seconds.
 
-Rebuild the local copy completely (only clears `~/.session-hub/hub.db`; source directories are untouched):
+For daily use, run it in the background instead — it keeps running after the terminal closes:
 
 ```bash
-npm start -- --rebuild
+node bin/session-hub.js start     # background daemon; prints pid and URL
+node bin/session-hub.js status    # exit 0 when running, 1 when stopped; --json for scripts
+node bin/session-hub.js logs -f   # follow the log files (-n N for a tail, --clear to reset)
+node bin/session-hub.js stop
+node bin/session-hub.js restart
+node bin/session-hub.js doctor    # check Node, local copy, logs, sources, and server
 ```
+
+`npm link` (or `npm install -g .`) puts `session-hub` on your PATH, so the commands above become `session-hub start`, `session-hub status`, and so on. Running `session-hub` with no command starts the background daemon.
+
+The daemon needs no service manager: it keeps a pid file at `~/.session-hub/hub.pid`, and `stop` only signals the process recorded there (SIGTERM, then SIGKILL if it does not exit). `status` answers from the running server when there is one and reads the local copy directly when there is not, so it works whether or not the daemon is up.
+
+### Logs
+
+Every changed session produces one line in `~/.session-hub/logs/hub-YYYY-MM-DD.log`. Files rotate daily, roll to `.1`, `.2`, … once a file reaches 10 MB, and files older than 30 days are deleted. The directory is `0700` and the files `0600`. Because those lines carry session ids and one-line summaries of session content, treat the log files with the same care as the sessions themselves. `SESSION_HUB_LOG_DIR` moves them elsewhere.
 
 ## Environment variables
 
@@ -94,6 +109,7 @@ npm start -- --rebuild
 | `SESSION_HUB_HOST` | `127.0.0.1` | Listen address; do not change to `0.0.0.0` unless necessary |
 | `SESSION_HUB_PORT` | `7317` | Listen port |
 | `SESSION_HUB_DB` | `~/.session-hub/hub.db` | Path to the local copy database |
+| `SESSION_HUB_LOG_DIR` | `~/.session-hub/logs` | Directory for the rotating log files |
 | `CLAUDE_HOME` | `~/.claude` | Claude Code data root |
 | `CODEX_HOME` | `~/.codex` | Codex data root |
 | `DSH_HOME` | `~/.dsh` | dsh data root |
@@ -109,7 +125,7 @@ npm start -- --rebuild
 - A **Settings** page at the bottom of the sidebar lets you toggle empty and temporary sessions independently, enable or disable each agent, switch the interface language, and inspect the local database and source directories. Disabling an agent stops syncing and removes its local copy; re-enabling it reads the source files again
 - A **Status** page next to Settings summarises every agent: session and message counts, the latest sync time, and for the newest session its internal id and a one-line summary of the latest message. Clicking it opens that session
 - Every session carries a stable internal **session id** (8 hex characters derived from the session key, so it survives `--rebuild`); the detail header shows it next to the agent
-- The background sync logs one line per changed session, `+ [agent] <session-id> <summary>`, and one line when a session disappears. Syncs that changed nothing print nothing — the Status page covers the overall picture
+- The background sync logs one line per changed session, `+ [agent] <session-id> <summary>`, and one line when a session disappears. Syncs that changed nothing print nothing — the Status page covers the overall picture. The same lines go to the rotating log files under `~/.session-hub/logs/`
 - The interface and all error messages are available in **Chinese and English**. The language follows your system language by default; you can override it in **Settings → Interface language** (System / 中文 / English)
 - Full-text search (SQLite FTS5 trigram; automatically falls back to `LIKE` for queries shorter than 3 characters)
 - Session detail: message order, thinking, tool calls, and tool results (collapsible). Messages, thinking, and tool content are rendered as Markdown, with automatic JSON indentation/formatting
@@ -130,6 +146,7 @@ npm start -- --rebuild
 - Session images are served only from inside the session's own working directory, and only for known image extensions; `..`, absolute paths outside it, symlinks, and other files are rejected.
 - The file viewer reads only local files you click: text is capped at 1 MB, binary content is reported but not displayed, and there is no write or upload path. Because the service is local-only and unauthenticated, any local file readable by your user can be opened through `/api/file` — keep the port on `127.0.0.1`.
 - The local copy database directory uses mode `0700`; the database and its WAL/SHM files use `0600`.
+- Hub logs contain session ids and one-line session summaries. Their directory is `0700` and each file `0600`; keep them as private as the sessions they describe.
 
 ## Tests
 
@@ -140,7 +157,17 @@ npm test
 ## Layout
 
 ```
+bin/
+  session-hub.js     CLI entry point
 src/
+  args.js            Hand-rolled command-line parsing
+  cli.js             Command dispatch: run, start, stop, restart, status, logs, doctor
+  hub.js             Server and sync lifecycle
+  daemon.js          Detached background process, pid file, liveness checks
+  status.js          Live-or-local status collection and formatting
+  logs.js            Tail, follow, and clear the rotating log files
+  log-file.js        Rotating log store (daily files, size cap, retention)
+  doctor.js          Read-only environment checks
   config.js          Environment variables and default paths
   db.js              SQLite schema, session writes, queries, pruning, FTS
   settings.js        Read, validate, and persist local settings
@@ -149,7 +176,7 @@ src/
   log.js             Timestamped sync change log lines
   sync.js            Incremental sync orchestration
   server.js          HTTP API + static files (image and file endpoints, asset versions)
-  index.js           Entry point and background sync
+  index.js           Compatibility entry point; runs in the foreground
   sources/
     claude.js        Claude session discovery and parsing
     codex.js         Codex rollout discovery and parsing

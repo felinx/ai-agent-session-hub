@@ -60,11 +60,12 @@ Agent Session Hub 直接读取这些会话文件，解析成统一结构，再�
 
 本工具**不会修改、移动或删除任何源目录里的文件**，也不调用任何外部网络服务。
 
-它只做三件事：
+它只做四件事：
 
 1. 读取 `~/.claude`、`~/.codex`、`~/.dsh`、`~/.workbuddy`，以及（存在时）`~/.lark-channel` 下的会话文件；
 2. 把解析结果写进自己独立的 SQLite 数据库 `~/.session-hub/hub.db`（目录 0700，数据库文件 0600）；
-3. 在 `127.0.0.1` 上提供本地网页与 JSON API。
+3. 把日志写进自己的 `~/.session-hub/logs`（目录 0700，文件 0600）；
+4. 在 `127.0.0.1` 上提供本地网页与 JSON API。
 
 源文件只被 `stat` 和读取；增量同步依据文件 `mtime` + `size` 判断是否变化。
 
@@ -76,16 +77,30 @@ Agent Session Hub 直接读取这些会话文件，解析成统一结构，再�
 ## 使用
 
 ```bash
-npm start
+npm start               # 前台运行
+npm start -- --rebuild  # 前台运行，并先重建本地副本
 ```
 
 默认打开 <http://127.0.0.1:7317>。首次启动会立即同步一次，之后每 5 秒增量同步。
 
-完全重建本地副本（只清空 `~/.session-hub/hub.db`，不碰源目录）：
+日常使用建议放到后台，关掉终端也会继续运行：
 
 ```bash
-npm start -- --rebuild
+node bin/session-hub.js start     # 后台守护进程，输出 pid 与地址
+node bin/session-hub.js status    # 运行中退出码 0，未运行 1；--json 供脚本使用
+node bin/session-hub.js logs -f   # 跟踪日志文件（-n N 看最近 N 行，--clear 清空）
+node bin/session-hub.js stop
+node bin/session-hub.js restart
+node bin/session-hub.js doctor    # 检查 Node、本地副本、日志、来源目录与服务状态
 ```
+
+`npm link`（或 `npm install -g .`）会把 `session-hub` 装到 PATH，上面的命令即可简写为 `session-hub start`、`session-hub status` 等；不带命令直接运行 `session-hub` 等同于 `start`。
+
+守护进程不依赖系统服务管理器：pid 文件位于 `~/.session-hub/hub.pid`，`stop` 只对记录在案的进程发信号（先 SIGTERM，超时再 SIGKILL）。`status` 在有服务时走 HTTP 查询，服务没起时直接读本地副本，两种情况都能用。
+
+### 日志
+
+每个发生变化的会话在 `~/.session-hub/logs/hub-YYYY-MM-DD.log` 里产生一行。日志按天切分，单文件达到 10 MB 时滚动为 `.1`、`.2`…，超过 30 天的文件自动删除。目录权限 `0700`，文件 `0600`。这些行包含 session id 和会话内容的单行摘要，请像对待会话本身一样对待日志文件；可用 `SESSION_HUB_LOG_DIR` 改到别处。
 
 ## 环境变量
 
@@ -94,6 +109,7 @@ npm start -- --rebuild
 | `SESSION_HUB_HOST` | `127.0.0.1` | 监听地址；非必要不要改成 `0.0.0.0` |
 | `SESSION_HUB_PORT` | `7317` | 监听端口 |
 | `SESSION_HUB_DB` | `~/.session-hub/hub.db` | 本地副本数据库路径 |
+| `SESSION_HUB_LOG_DIR` | `~/.session-hub/logs` | 滚动日志文件所在目录 |
 | `CLAUDE_HOME` | `~/.claude` | Claude Code 数据根目录 |
 | `CODEX_HOME` | `~/.codex` | Codex 数据根目录 |
 | `DSH_HOME` | `~/.dsh` | dsh 数据根目录 |
@@ -109,7 +125,7 @@ npm start -- --rebuild
 - 侧边栏底部「设置」页：可分别开关空会话与临时目录会话、启用/停用各个 Agent、切换界面语言、查看本地数据库与各来源目录；停用 Agent 后会停止同步并移除其本地副本，重新启用会再次读取源文件
 - 设置旁的「状态」页按 Agent 汇总会话数、消息数、最近同步时间，并展示最近一条会话的内部 ID 与最新消息的单行摘要；点击即可打开该会话
 - 每个会话都有稳定的内部 **session id**（由会话 key 派生的 8 位十六进制串，`--rebuild` 后不变），详情页头部会展示
-- 后台同步只为发生变化的会话各打一行日志：`+ [agent] <session-id> <摘要>`，会话从来源消失时打一行删除记录；没有变化时不输出，整体情况看「状态」页
+- 后台同步只为发生变化的会话各打一行日志：`+ [agent] <session-id> <摘要>`，会话从来源消失时打一行删除记录；没有变化时不输出，整体情况看「状态」页。同样的内容会写入 `~/.session-hub/logs/` 下的滚动日志文件
 - 界面与错误提示支持**中文和英文**。默认跟随系统语言，可在「设置 → 界面语言」中改为跟随系统、中文或 English
 - 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
 - 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）；消息、思考与工具内容按 Markdown 渲染，JSON 内容自动缩进格式化
@@ -130,6 +146,7 @@ npm start -- --rebuild
 - 会话图片只允许来自该会话自己的工作目录，且仅限已知图片扩展名；`..`、目录外的绝对路径、符号链接与其它文件一律拒绝。
 - 文件查看器只读取你点击的本地文件：文本上限 1 MB，二进制内容只提示不展示，也没有写入或上传通道。由于服务只在本机运行且没有鉴权，当前用户可读的任意本地文件都能通过 `/api/file` 打开——请务必只监听 `127.0.0.1`。
 - 本地副本数据库目录权限 `0700`、数据库及 WAL/SHM 文件 `0600`。
+- 日志包含 session id 与会话内容的单行摘要；日志目录 `0700`、文件 `0600`，请按会话本身的私密级别对待。
 
 ## 测试
 
@@ -140,7 +157,17 @@ npm test
 ## 结构
 
 ```
+bin/
+  session-hub.js     命令行入口
 src/
+  args.js            手写的命令行参数解析
+  cli.js             命令分发：run / start / stop / restart / status / logs / doctor
+  hub.js             服务与同步生命周期
+  daemon.js          后台守护进程、pid 文件、存活检查
+  status.js          实时或本地副本的状态采集与格式化
+  logs.js            滚动日志的查看、跟踪与清空
+  log-file.js        滚动日志存储（按天切分、大小上限、保留期）
+  doctor.js          只读的环境自检
   config.js          环境变量与默认路径
   db.js              SQLite schema、会话写入、查询、清理、FTS
   settings.js        本地设置的读取、校验与保存
@@ -149,7 +176,7 @@ src/
   log.js             带时间戳的同步变更日志
   sync.js            增量同步编排
   server.js          HTTP API + 静态文件（图片/文件接口、资源版本号）
-  index.js           入口与后台同步
+  index.js           兼容入口，以前台方式运行
   sources/
     claude.js        Claude 会话发现与解析
     codex.js         Codex rollout 发现与解析
