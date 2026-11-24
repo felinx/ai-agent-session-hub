@@ -11,7 +11,13 @@
     <header class="topbar">
       <h1>Session Hub</h1>
       <nav id="agent-chips" class="chips" aria-label="Filter by agent"></nav>
-      <input id="search" type="search" placeholder="Search session content" autocomplete="off" aria-label="Search session content">
+      <label class="search-field">
+        <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="5.5"></circle>
+          <path d="M12.6 12.6 17 17"></path>
+        </svg>
+        <input id="search" type="search" placeholder="Search session content" autocomplete="off" aria-label="Search session content">
+      </label>
       <div id="filters" class="filters"></div>
       <span id="status" class="status">Loading…</span>
     </header>

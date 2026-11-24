@@ -94,13 +94,31 @@ body {
 }
 
 #search {
-  flex: 1 1 220px;
-  min-width: 160px;
-  padding: 7px 11px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 11px 7px 32px;
   border: 1px solid var(--border);
   border-radius: 8px;
   font: inherit;
   background: #fff;
+}
+
+.search-field {
+  position: relative;
+  display: flex;
+  flex: 1 1 220px;
+  min-width: 160px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  color: #9aa1ab;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 #search:focus {
