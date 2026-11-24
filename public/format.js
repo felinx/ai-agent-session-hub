@@ -25,8 +25,13 @@ function renderInline(escaped) {
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
   text = text.replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (match, alt, src) => {
-    // 只接受 http(s)、data:image 或无协议的本地路径；其余（javascript:、file: 等）保持原文。
-    if (!/^(?:https?:\/\/|data:image\/|[^:]*$)/i.test(src)) return match;
+    // 远程图片不直接 <img>：CSP 只允许同源图片，加载会被拦截并产生控制台报错，
+    // 还会把访问者的 IP 暴露给第三方；改为可点击的外链。
+    if (/^https?:\/\//i.test(src)) {
+      return `<a class="image-external" href="${src}" target="_blank" rel="noopener noreferrer" title="${src}">${alt || src}</a>`;
+    }
+    // 只接受 data:image 或无协议的本地路径；其余（javascript:、file: 等）保持原文。
+    if (!/^(?:data:image\/|[^:]*$)/i.test(src)) return match;
     return `<img class="message-image" data-image-src="${src}" alt="${alt}" loading="lazy">`;
   });
   text = text.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, href) => {

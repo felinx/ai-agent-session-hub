@@ -92,3 +92,12 @@ test('renderMarkdown 保留锚点与相对文件链接的区分', () => {
   assert.match(file, /data-file-href="docs\/README\.md"/);
   assert.doesNotMatch(file, /<a href="docs/);
 });
+
+test('renderMarkdown 把远程图片渲染成外链而不是受 CSP 拦截的 img', () => {
+  const html = renderMarkdown('![npm](https://img.shields.io/npm/v/dsh-lark-channel)');
+  assert.equal(html.includes('<img'), false);
+  assert.match(
+    html,
+    /<a class="image-external" href="https:\/\/img\.shields\.io\/npm\/v\/dsh-lark-channel" target="_blank" rel="noopener noreferrer" title="https:\/\/img\.shields\.io\/npm\/v\/dsh-lark-channel">npm<\/a>/
+  );
+});

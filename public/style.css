@@ -773,6 +773,33 @@ details:not([open]) > summary.detail-toggle .copy-btn {
   text-underline-offset: 2px;
 }
 
+/* 远程图片不自动加载（CSP 只放行同源图片），渲染成可点击的外部链接徽章。 */
+.markdown a.image-external {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f7f8fa;
+  color: #52606d;
+  font-size: 12px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.markdown a.image-external::after {
+  content: "↗";
+  flex: none;
+  color: #9aa1ab;
+}
+
+.markdown a.image-external:hover {
+  border-color: #c9ced6;
+  color: var(--text);
+}
+
 .viewer-body {
   background: var(--panel);
 }
