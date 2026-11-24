@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync, chmodSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { sessionId } from './session-id.js';
 
 const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const dbPaths = new WeakMap();
@@ -176,7 +177,7 @@ const SESSION_COLUMNS = `
 `;
 
 function toSession(row) {
-  return { ...row, archived: !!row.archived };
+  return { ...row, id: sessionId(row.key), archived: !!row.archived };
 }
 
 // Sessions hidden by default: empty sessions with no messages, and sessions whose cwd
@@ -320,3 +321,4 @@ export function getFacets(db, options = {}) {
     ).all(...params)
   };
 }
+
