@@ -66,11 +66,14 @@ test('重新 replace 会替换旧消息且不留孤儿', () => {
   db.close();
 });
 
-test('pruneMissing 删除不在 keepPaths 的会话与 sync_state', () => {
+test('pruneMissing 删除不在 keepPaths 的会话与 sync_state，并返回被删会话摘要', () => {
   const db = freshDb();
   replaceSession(db, makeSession(), [{ role: 'user', text: 'hi' }], { mtimeMs: 10, size: 100 });
 
-  assert.equal(pruneMissing(db, new Set(['/other'])), 1);
+  const removed = pruneMissing(db, new Set(['/other']));
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].key, makeSession().key);
+  assert.equal(removed[0].agent, makeSession().agent);
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 0);
   assert.equal(db.prepare('SELECT count(*) c FROM sync_state').get().c, 0);
   db.close();

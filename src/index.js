@@ -8,6 +8,7 @@ import { syncOnce } from './sync.js';
 import { createServer } from './server.js';
 import { getSettings } from './settings.js';
 import { formatWarning, resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
+import { stamp, describeSync, hasChanges } from './log.js';
 
 const config = loadConfig();
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -28,11 +29,15 @@ function currentLanguage() {
 
 let syncing = false;
 let forceNext = config.rebuild;
+let lastQuietLogAt = 0;
+// 静默同步每 5 秒一次，只在有变化或有告警时打明细；无变化时最多每 5 分钟留一行心跳。
+const QUIET_LOG_INTERVAL_MS = 5 * 60_000;
 
 async function runSync() {
   if (syncing) return;
   syncing = true;
   state.scanning = true;
+  const startedAt = Date.now();
 
   try {
     const result = await syncOnce(db, config, { force: forceNext });
@@ -40,19 +45,23 @@ async function runSync() {
     state.lastSyncAt = Date.now();
     state.warnings = result.warnings;
 
-    if (result.warnings.length > 0) {
-      const lang = currentLanguage();
-      for (const warning of result.warnings) {
-        console.warn(`[sync] ${formatWarning(lang, warning)}`);
-      }
+    const lang = currentLanguage();
+    for (const warning of result.warnings) {
+      console.warn(`${stamp()} ${formatWarning(lang, warning)}`);
     }
-    console.log(
-      `[sync] +${result.added} ~${result.updated} =${result.unchanged} -${result.removed}`
-    );
+
+    const now = new Date();
+    const quiet = !hasChanges(result);
+    if (!quiet || now.getTime() - lastQuietLogAt >= QUIET_LOG_INTERVAL_MS) {
+      for (const line of describeSync(result, lang, { now, elapsedMs: now.getTime() - startedAt })) {
+        console.log(line);
+      }
+      if (quiet) lastQuietLogAt = now.getTime();
+    }
   } catch (error) {
     const message = String(error?.message ?? error);
     state.warnings = [{ code: 'syncFailed', params: { message } }];
-    console.error(`[sync] ${formatWarning(currentLanguage(), state.warnings[0])}`);
+    console.error(`${stamp()} ${formatWarning(currentLanguage(), state.warnings[0])}`);
   } finally {
     syncing = false;
     state.scanning = false;
@@ -60,25 +69,25 @@ async function runSync() {
 }
 
 server.on('error', (error) => {
-  console.error(t(currentLanguage(), 'server.listenFailed', {
+  console.error(`${stamp()} ${t(currentLanguage(), 'server.listenFailed', {
     host: config.host,
     port: config.port,
     message: error.message
-  }));
+  })}`);
   db.close();
   process.exit(1);
 });
 
 server.listen(config.port, config.host, () => {
-  console.log(`Agent Session Hub → http://${config.host}:${config.port}`);
-  console.log(t(currentLanguage(), 'server.database', { path: config.dbPath }));
+  console.log(`${stamp()} Agent Session Hub → http://${config.host}:${config.port}`);
+  console.log(`${stamp()} ${t(currentLanguage(), 'server.database', { path: config.dbPath })}`);
   runSync();
 });
 
 const timer = setInterval(runSync, 5000);
 
 function shutdown(signal) {
-  console.log(t(currentLanguage(), 'server.shutdown', { signal }));
+  console.log(`${stamp()} ${t(currentLanguage(), 'server.shutdown', { signal })}`);
   clearInterval(timer);
   server.close(() => {
     db.close();

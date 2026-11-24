@@ -63,7 +63,7 @@ export async function syncOnce(db, config, opts = {}) {
   let added = 0;
   let updated = 0;
   let unchanged = 0;
-  let removed = 0;
+  const changes = [];
 
   for (let i = 0; i < sources.length; i++) {
     const source = sources[i];
@@ -111,8 +111,16 @@ export async function syncOnce(db, config, opts = {}) {
         extraJson: JSON.stringify(parsed.extra ?? null)
       };
 
-      if (hasSession(db, key)) updated += 1;
+      const isUpdate = hasSession(db, key);
+      if (isUpdate) updated += 1;
       else added += 1;
+      changes.push({
+        kind: isUpdate ? 'updated' : 'added',
+        agent: file.agent,
+        title: session.title,
+        messages: session.messageCount,
+        updatedAt: session.updatedAt
+      });
 
       replaceSession(db, session, parsed.messages, {
         mtimeMs: file.mtimeMs,
@@ -121,9 +129,19 @@ export async function syncOnce(db, config, opts = {}) {
     }
   }
 
+  let removed = 0;
   if (results.every(result => result.ok)) {
-    removed = pruneMissing(db, new Set(discovered.map(file => file.sourcePath)));
+    const removedSessions = pruneMissing(db, new Set(discovered.map(file => file.sourcePath)));
+    removed = removedSessions.length;
+    for (const session of removedSessions) {
+      changes.push({ kind: 'removed', agent: session.agent, title: session.title });
+    }
   }
 
-  return { added, updated, unchanged, removed, warnings };
+  const byAgent = db.prepare(
+    'SELECT agent, count(*) AS count FROM sessions GROUP BY agent ORDER BY agent'
+  ).all().map(row => ({ agent: row.agent, count: row.count }));
+  const total = byAgent.reduce((sum, entry) => sum + entry.count, 0);
+
+  return { added, updated, unchanged, removed, changes, total, byAgent, warnings };
 }

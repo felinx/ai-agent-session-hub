@@ -141,12 +141,12 @@ export function pruneMissing(db, keepPaths) {
     const deleteSession = db.prepare('DELETE FROM sessions WHERE key = ?');
     const deleteSync = db.prepare('DELETE FROM sync_state WHERE source_path = ?');
 
-    let removed = 0;
-    for (const row of db.prepare('SELECT key, source_path FROM sessions').all()) {
+    const removed = [];
+    for (const row of db.prepare('SELECT key, agent, title, source_path FROM sessions').all()) {
       if (!keepPaths.has(row.source_path)) {
         deleteFts.run(row.key);
         deleteSession.run(row.key);
-        removed++;
+        removed.push({ key: row.key, agent: row.agent, title: row.title });
       }
     }
     for (const row of db.prepare('SELECT source_path FROM sync_state').all()) {
