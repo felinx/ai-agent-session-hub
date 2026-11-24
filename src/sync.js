@@ -99,7 +99,7 @@ export async function syncOnce(db, config, opts = {}) {
         key,
         agent: file.agent,
         nativeId: parsed.nativeId,
-        title: parsed.title || '未命名会话',
+        title: parsed.title || '',
         cwd: parsed.cwd ?? null,
         chatId: chatMap.get(key) ?? file.chatHint ?? null,
         createdAt: parsed.createdAt ?? null,
@@ -117,7 +117,7 @@ export async function syncOnce(db, config, opts = {}) {
       changes.push({
         kind: isUpdate ? 'updated' : 'added',
         agent: file.agent,
-        title: session.title,
+        title: session.title || session.nativeId,
         messages: session.messageCount,
         updatedAt: session.updatedAt
       });
@@ -134,7 +134,7 @@ export async function syncOnce(db, config, opts = {}) {
     const removedSessions = pruneMissing(db, new Set(discovered.map(file => file.sourcePath)));
     removed = removedSessions.length;
     for (const session of removedSessions) {
-      changes.push({ kind: 'removed', agent: session.agent, title: session.title });
+      changes.push({ kind: 'removed', agent: session.agent, title: session.title || session.key });
     }
   }
 

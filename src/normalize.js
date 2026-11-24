@@ -40,7 +40,7 @@ export function truncate(text, n) {
   return text.slice(0, n);
 }
 
-export function deriveTitle(text, fallback = '未命名会话') {
+export function deriveTitle(text, fallback = '') {
   const stripped = stripBridgeContext(text);
   const line = stripped.split('\n').map(l => l.trim()).find(l => l !== '') ?? '';
   return line ? truncate(line, 80) : fallback;

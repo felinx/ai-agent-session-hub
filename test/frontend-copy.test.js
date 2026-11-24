@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { messagePlainText, toolResultPlainText } from '../public/copy.js';
 
-test('messagePlainText 按思考、正文、工具调用、工具结果顺序拼接', () => {
+test('messagePlainText joins thinking, text, tool calls, and tool results in order', () => {
   const text = messagePlainText({
     thinking: '想一想',
     text: '答案',
@@ -14,34 +14,34 @@ test('messagePlainText 按思考、正文、工具调用、工具结果顺序拼
     '',
     '答案',
     '',
-    '工具调用 · Read',
+    'tool call · Read',
     '{\n  "file_path": "/a"\n}',
     '',
-    '工具结果',
+    'tool result',
     'ok'
   ].join('\n'));
 });
 
-test('messagePlainText 标记错误工具结果并序列化非字符串输出', () => {
+test('messagePlainText marks error tool results and serializes non-string output', () => {
   const text = messagePlainText({
     toolResults: [{ isError: true, output: { code: 1 } }]
   });
-  assert.equal(text, '工具结果 · 错误\n{\n  "code": 1\n}');
+  assert.equal(text, 'tool result · error\n{\n  "code": 1\n}');
 });
 
-test('messagePlainText 处理缺失工具名与字符串参数', () => {
+test('messagePlainText handles a missing tool name and string input', () => {
   assert.equal(
     messagePlainText({ toolCalls: [{ input: 'ls -la' }] }),
-    '工具调用 · unknown\nls -la'
+    'tool call · unknown\nls -la'
   );
 });
 
-test('messagePlainText 空消息返回空字符串，纯正文不产生多余空行', () => {
+test('messagePlainText returns an empty string for empty messages and adds no blank lines for plain text', () => {
   assert.equal(messagePlainText({}), '');
   assert.equal(messagePlainText({ text: '只有正文' }), '只有正文');
 });
 
-test('messagePlainText 可接受本地化标签', () => {
+test('messagePlainText accepts localized labels', () => {
   const text = messagePlainText({
     toolCalls: [{ name: 'Read', input: 'x' }],
     toolResults: [{ output: 'y', isError: true }]
@@ -53,7 +53,7 @@ test('messagePlainText 可接受本地化标签', () => {
   assert.equal(text, 'Tool call · Read\nx\n\nTool result · error\ny');
 });
 
-test('toolResultPlainText 原样保留字符串，格式化对象，空值返回空字符串', () => {
+test('toolResultPlainText keeps strings, formats objects, and returns an empty string for empty values', () => {
   assert.equal(toolResultPlainText({ output: 'raw output' }), 'raw output');
   assert.equal(toolResultPlainText({ output: { a: 1 } }), '{\n  "a": 1\n}');
   assert.equal(toolResultPlainText({}), '');

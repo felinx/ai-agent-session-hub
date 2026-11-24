@@ -38,7 +38,7 @@ function userText(content) {
     : [];
   if (images.length === 0) return text;
   const label = images
-    .map(image => image.original_filename ? `[图片: ${image.original_filename}]` : '[图片]')
+    .map(image => image.original_filename ? `[image: ${image.original_filename}]` : '[image]')
     .join('\n');
   return text ? `${text}\n${label}` : label;
 }

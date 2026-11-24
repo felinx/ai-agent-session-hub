@@ -49,9 +49,11 @@ function saveKeySet(key, set) {
   } catch {}
 }
 
-// 项目默认全部收起；记住用户展开过的项目与手动收起的区块。
+// Projects start collapsed; remember which projects the user expanded and which sections they closed manually.
 const expandedProjects = loadKeySet(`${STORAGE_PREFIX}expanded-projects`);
 const closedSections = loadKeySet(`${STORAGE_PREFIX}closed-sections`);
+// Compatibility with storage written before the keys were localized: the legacy localized
+// section keys map to the current 'projects' / 'recent'. Kept only to migrate existing data.
 if (closedSections.has('项目') || closedSections.has('最近')) {
   if (closedSections.delete('项目')) closedSections.add('projects');
   if (closedSections.delete('最近')) closedSections.add('recent');
@@ -349,6 +351,8 @@ function sessionItem(session) {
   ]);
 }
 
+// Titles stored by versions that wrote a fixed Chinese "untitled session" string.
+// Kept only so old rows still render through i18n instead of showing the raw legacy text.
 const LEGACY_UNTITLED_RE = /^未命名会话(?: · (.+))?$/;
 
 function sessionTitle(session) {
@@ -357,7 +361,9 @@ function sessionTitle(session) {
   if (legacy) {
     return legacy[1] ? tr('session.untitledWithId', { id: legacy[1] }) : tr('session.untitled');
   }
-  return title || tr('session.untitled');
+  if (title) return title;
+  const id = session?.nativeId ? String(session.nativeId).slice(0, 8) : '';
+  return id ? tr('session.untitledWithId', { id }) : tr('session.untitled');
 }
 
 function projectLabel(cwd) {
@@ -482,8 +488,9 @@ async function loadSessions() {
 }
 
 function detailsBlock(summary, bodyNode, copyText) {
-  // 复制按钮不能放进 <summary>：交互元素嵌在 summary 里可访问性不一致（Chrome 会报 Issue），
-  // 因此作为 details 的兄弟节点绝对定位到标题行右侧。
+  // The copy button cannot live inside <summary>: interactive elements there are not
+  // consistently accessible (Chrome reports an issue for every block), so it is a sibling
+  // absolutely positioned over the summary row.
   return el('details', { class: 'detail-block' }, [
     el('summary', { class: 'detail-toggle' }, [
       el('span', { class: 'chevron', html: CHEVRON_ICON }),
@@ -494,7 +501,8 @@ function detailsBlock(summary, bodyNode, copyText) {
   ]);
 }
 
-// renderMarkdown 先转义全部文本，只产出受控标签；这里注入的 HTML 不含未转义的用户输入。
+// renderMarkdown escapes all text first and only emits a controlled tag set; the HTML injected
+// here contains no unescaped user input.
 function markdownBlock(text, className) {
   const html = renderMarkdown(text);
   if (!html) return el('div', { class: className, text });
@@ -504,7 +512,7 @@ function markdownBlock(text, className) {
   return block;
 }
 
-// 本地文件链接在渲染后补上查看页地址，并保留 #L58-L62 这类行号片段。
+// Local file links get the viewer URL after rendering, keeping line fragments such as #L58-L62.
 function hydrateFileLinks(container) {
   for (const link of container.querySelectorAll('a[data-file-href]')) {
     const href = link.dataset.fileHref;
@@ -533,8 +541,8 @@ function showMissingImage(img, source) {
   ]));
 }
 
-// 图片先以 data-image-src 输出，渲染后再按当前会话解析成只读资源地址；
-// 加载失败（例如文件已被删除）时替换为占位样式。
+// Images are emitted as data-image-src first and resolved to a read-only asset URL for the
+// current session after rendering; a failed load (for example a deleted file) becomes a placeholder.
 function hydrateImages(container) {
   const sessionKey = state.selected;
   for (const img of container.querySelectorAll('img[data-image-src]')) {
@@ -875,7 +883,7 @@ async function hydrateSettings() {
   try {
     adoptSettings(await fetchSettings());
   } catch {
-    // 语言回退到系统设置，其余设置保持默认。
+    // Fall back to the system language; other settings keep their defaults.
   }
 }
 

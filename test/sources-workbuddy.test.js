@@ -23,7 +23,7 @@ function writeLines(root, slug, name, lines) {
   return target;
 }
 
-test('parseWorkbuddy 聚合助手回合并过滤内部记录', async () => {
+test('parseWorkbuddy groups assistant turns and filters internal records', async () => {
   const p = await parseWorkbuddy(file);
   assert.equal(p.nativeId, '44444444-4444-4444-8444-444444444444');
   assert.equal(p.cwd, '/tmp/workbuddy');
@@ -47,7 +47,7 @@ test('parseWorkbuddy 聚合助手回合并过滤内部记录', async () => {
   assert.deepEqual(second.toolResults[0], { callId: 'call-2', output: 'boom', isError: true });
 });
 
-test('系统上下文、后台通知与图片占位处理，最后一行不完整时跳过', async () => {
+test('handles system context, background notifications, and image placeholders, skipping an incomplete last line', async () => {
   const root = tmp();
   const target = path.join(root, 'session.jsonl');
   writeFileSync(target, [
@@ -77,12 +77,12 @@ test('系统上下文、后台通知与图片占位处理，最后一行不完�
   const p = await parseWorkbuddy(target);
   assert.equal(p.title, '真实问题');
   assert.equal(p.messages.length, 3);
-  assert.equal(p.messages[0].text, '[图片: IMG_1.JPG]');
+  assert.equal(p.messages[0].text, '[image: IMG_1.JPG]');
   assert.equal(p.messages[1].text, '真实问题');
   assert.equal(p.messages[2].text, '回答');
 });
 
-test('系统生成的日期时间目录保留原始 cwd', async () => {
+test('preserves the original cwd for system-generated date-time directories', async () => {
   const root = tmp();
   const target = path.join(root, 'session.jsonl');
   writeFileSync(target, [
@@ -97,7 +97,7 @@ test('系统生成的日期时间目录保留原始 cwd', async () => {
   assert.equal(p.cwd, '/Users/felinx/WorkBuddy/2026-10-02-11-25-23');
 });
 
-test('工具参数不是合法 JSON 时保留原始字符串', async () => {
+test('preserves the raw string when tool arguments are not valid JSON', async () => {
   const root = tmp();
   const target = path.join(root, 'session.jsonl');
   writeFileSync(target, [
@@ -117,7 +117,7 @@ test('工具参数不是合法 JSON 时保留原始字符串', async () => {
   assert.equal(p.messages[0].toolCalls[0].input, '{not json}');
 });
 
-test('只有推理或工具记录时，助手消息继承记录时间戳', async () => {
+test('assistant messages inherit record timestamps when there are only reasoning or tool records', async () => {
   const root = tmp();
   const target = path.join(root, 'session.jsonl');
   writeFileSync(target, [
@@ -135,7 +135,7 @@ test('只有推理或工具记录时，助手消息继承记录时间戳', async
   assert.equal(p.messages[0].at, 1795000005000);
 });
 
-test('discoverWorkbuddy 只收集 UUID 命名的 jsonl 会话', async () => {
+test('discoverWorkbuddy collects only UUID-named jsonl sessions', async () => {
   const root = tmp();
   const nativeId = '55555555-5555-4555-8555-555555555555';
   copyFileSync(file, writeLines(root, 'Users-felinx-WorkBuddy-misc', `${nativeId}.jsonl`, []));

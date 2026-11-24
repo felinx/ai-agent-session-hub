@@ -241,7 +241,7 @@ export async function parseCodex(sourcePath, discovery) {
   return {
     nativeId: nativeId ?? path.basename(sourcePath).replace(/\.jsonl$/, ''),
     title: discovery?.titleHint ||
-      deriveTitle(firstUserText, nativeId ? `未命名会话 · ${nativeId.slice(0, 8)}` : '未命名会话'),
+      deriveTitle(firstUserText, ''),
     cwd,
     createdAt,
     messages

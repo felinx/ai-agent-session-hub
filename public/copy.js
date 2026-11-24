@@ -8,10 +8,11 @@ function formatValue(value) {
   }
 }
 
+// Default labels are language-neutral English; callers pass localized labels when they have them.
 const DEFAULT_LABELS = {
-  toolCall: name => `工具调用 · ${name ?? 'unknown'}`,
-  toolResult: '工具结果',
-  errorSuffix: ' · 错误'
+  toolCall: name => `tool call · ${name ?? 'unknown'}`,
+  toolResult: 'tool result',
+  errorSuffix: ' · error'
 };
 
 export function messagePlainText(message = {}, labels = {}) {
