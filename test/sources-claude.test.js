@@ -13,7 +13,7 @@ function tmp() {
   return mkdtempSync(path.join(tmpdir(), 'session-hub-claude-'));
 }
 
-test('parseClaude 提取消息、思考与工具结果', async () => {
+test('parseClaude extracts messages, thinking, and tool results', async () => {
   const p = await parseClaude(file);
   assert.equal(p.nativeId, '11111111-1111-4111-8111-111111111111');
   assert.equal(p.cwd, '/tmp/proj');
@@ -26,7 +26,7 @@ test('parseClaude 提取消息、思考与工具结果', async () => {
   assert.deepEqual(p.messages[1].toolResults[0], { callId: 'toolu_1', output: 'a.txt', isError: false });
 });
 
-test('最后一行不完整时跳过、不抛错', async () => {
+test('skips an incomplete last line without throwing', async () => {
   const dir = tmp();
   const target = path.join(dir, 'session.jsonl');
   copyFileSync(file, target);
@@ -35,7 +35,7 @@ test('最后一行不完整时跳过、不抛错', async () => {
   assert.equal(p.messages.length, 2);
 });
 
-test('custom-title 优先，子代理文件被忽略', async () => {
+test('custom-title takes precedence and subagent files are ignored', async () => {
   const root = tmp();
   const projectDir = path.join(root, 'projects', 'p1');
   const nativeId = '22222222-2222-4222-8222-222222222222';
@@ -56,7 +56,7 @@ test('custom-title 优先，子代理文件被忽略', async () => {
   assert.equal(p.title, '自定义标题');
 });
 
-test('超大工具结果仍可解析', async () => {
+test('parses oversized tool results', async () => {
   const dir = tmp();
   const target = path.join(dir, 'big.jsonl');
   const big = 'x'.repeat(300 * 1024);

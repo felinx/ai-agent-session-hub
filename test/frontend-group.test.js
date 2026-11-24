@@ -6,7 +6,7 @@ function s(key, cwd, updatedAt) {
   return { key, cwd, updatedAt };
 }
 
-test('按 cwd 分组，组间与组内均按最近更新倒序', () => {
+test('groups by cwd and sorts both groups and sessions by most recently updated first', () => {
   const groups = groupSessionsByProject([
     s('a1', '/p1', 100),
     s('b1', '/p2', 300),
@@ -18,7 +18,7 @@ test('按 cwd 分组，组间与组内均按最近更新倒序', () => {
   assert.deepEqual(groups[1].sessions.map(x => x.key), ['a2', 'a1']);
 });
 
-test('无 cwd 的会话归入末尾分组', () => {
+test('sessions without a cwd go into the last group', () => {
   const groups = groupSessionsByProject([
     s('none', null, 999),
     s('a', '/p1', 100)
@@ -27,7 +27,7 @@ test('无 cwd 的会话归入末尾分组', () => {
   assert.deepEqual(groups[1].sessions.map(x => x.key), ['none']);
 });
 
-test('WorkBuddy 日期时间目录归入 workbuddy-default，但保留会话原始 cwd', () => {
+test('WorkBuddy date-time directories go into workbuddy-default but preserve the original cwd of each session', () => {
   const groups = groupSessionsByProject([
     { key: 'wb1', agent: 'workbuddy', cwd: '/Users/felinx/WorkBuddy/2026-10-02-11-25-23', updatedAt: 200 },
     { key: 'wb2', agent: 'workbuddy', cwd: '/Users/felinx/WorkBuddy/2026-10-11-07-20-59', updatedAt: 100 },
@@ -44,7 +44,7 @@ test('WorkBuddy 日期时间目录归入 workbuddy-default，但保留会话原�
   assert.ok(groups.some(group => group.cwd === '/Users/felinx/project/2026-10-02-11-25-23'));
 });
 
-test('空数组返回空数组，且不修改输入顺序', () => {
+test('returns an empty array for empty input and does not modify input order', () => {
   assert.deepEqual(groupSessionsByProject([]), []);
   const input = [s('a1', '/p1', 100), s('a2', '/p1', 200)];
   groupSessionsByProject(input);

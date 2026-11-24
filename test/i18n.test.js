@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { t, resolveLanguage, MESSAGES } from '../public/i18n.js';
 
-test('resolveLanguage 按显式偏好或系统语言解析', () => {
+test('resolveLanguage follows the explicit preference or falls back to the system language', () => {
   assert.equal(resolveLanguage('zh', 'en-US'), 'zh');
   assert.equal(resolveLanguage('en', 'zh-CN'), 'en');
   assert.equal(resolveLanguage('auto', 'zh-CN'), 'zh');
@@ -12,12 +12,12 @@ test('resolveLanguage 按显式偏好或系统语言解析', () => {
   assert.equal(resolveLanguage('nope', 'en-GB'), 'en');
 });
 
-test('t 支持参数插值与缺失键回退', () => {
+test('t supports parameter interpolation and falls back for missing keys', () => {
   assert.equal(t('zh', 'status.sessions', { count: 3 }), '3 个会话');
   assert.equal(t('en', 'status.sessions', { count: 3 }), '3 sessions');
   assert.equal(t('en', 'missing.key'), 'missing.key');
 });
 
-test('中英文目录包含相同的键', () => {
+test('Chinese and English message catalogs contain the same keys', () => {
   assert.deepEqual(Object.keys(MESSAGES.zh).sort(), Object.keys(MESSAGES.en).sort());
 });

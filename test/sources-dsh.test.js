@@ -29,7 +29,7 @@ const LINES = [
   { type: 'turn/end', seq: 6, data: {} }
 ];
 
-test('parseDsh 提取元数据、标题、消息与工具', async () => {
+test('parseDsh extracts metadata, title, messages, and tools', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-'));
   const file = writeSession(root, 'slug', 'session-33333333-3333-4333-8333-333333333333', LINES);
 
@@ -43,7 +43,7 @@ test('parseDsh 提取元数据、标题、消息与工具', async () => {
   assert.deepEqual(p.messages[1].toolResults[0], { callId: 'tool-1', output: '# README', isError: false });
 });
 
-test('parseDsh 跳过 harness 上下文消息', async () => {
+test('parseDsh skips harness context messages', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-'));
   const file = writeSession(root, 'slug', 'session-context', [
     { type: 'session', id: 'session-context', createdAt: 1, cwd: '/tmp/dsh' },
@@ -58,7 +58,7 @@ test('parseDsh 跳过 harness 上下文消息', async () => {
   assert.equal(p.messages[0].text, '真实问题');
 });
 
-test('discoverDsh 找出 zstd 会话并按目录名提取 chatId', async () => {
+test('discoverDsh finds zstd sessions and extracts chatId from directory names', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-'));
   writeSession(root, 'slug', 'session-33333333-3333-4333-8333-333333333333', LINES);
   writeSession(root, 'lark', 'lark-oc_ABC--hash', LINES);
@@ -69,7 +69,7 @@ test('discoverDsh 找出 zstd 会话并按目录名提取 chatId', async () => {
   assert.equal(lark.chatHint, 'oc_ABC');
 });
 
-test('缺少 projcache 与损坏压缩文件不影响其它会话', async () => {
+test('missing projcache and corrupt compressed files do not affect other sessions', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-'));
   writeSession(root, 'slug', 'session-33333333-3333-4333-8333-333333333333', LINES);
   const badDir = path.join(root, 'sessions', 'slug', 'broken');

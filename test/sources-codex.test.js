@@ -19,7 +19,7 @@ function makeRoot({ withIndex }) {
   return root;
 }
 
-test('parseCodex 提取消息、思考、工具', async () => {
+test('parseCodex extracts messages, thinking, and tools', async () => {
   const p = await parseCodex(rollout, { titleHint: '检查构建' });
   assert.equal(p.nativeId, '22222222-2222-4222-8222-222222222222');
   assert.equal(p.cwd, '/tmp/codex');
@@ -30,14 +30,14 @@ test('parseCodex 提取消息、思考、工具', async () => {
   assert.deepEqual(p.messages[1].toolResults[0], { callId: 'toolu_1', output: 'a.txt', isError: false });
 });
 
-test('discoverCodex 读取索引标题并排除子代理', async () => {
+test('discoverCodex reads index titles and excludes subagents', async () => {
   const root = makeRoot({ withIndex: true });
   const files = await discoverCodex({ roots: { codex: root } });
   assert.equal(files.length, 1);
   assert.equal(files[0].titleHint, '检查构建');
 });
 
-test('discoverCodex 排除 onboarding_checklist 辅助会话', async () => {
+test('discoverCodex excludes onboarding_checklist auxiliary sessions', async () => {
   const root = makeRoot({ withIndex: true });
   copyFileSync(
     path.join(FIXTURES, 'onboarding.jsonl'),
@@ -48,14 +48,14 @@ test('discoverCodex 排除 onboarding_checklist 辅助会话', async () => {
   assert.equal(files[0].nativeId, '22222222-2222-4222-8222-222222222222');
 });
 
-test('缺失索引时回退首条真实用户文本', async () => {
+test('falls back to the first real user text when the index is missing', async () => {
   const root = makeRoot({ withIndex: false });
   const [file] = await discoverCodex({ roots: { codex: root } });
   const p = await parseCodex(file.sourcePath, file);
   assert.equal(p.title, '检查构建失败');
 });
 
-test('custom_tool_call_output 的 content block 数组转文本', async () => {
+test('custom_tool_call_output converts content block arrays to text', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-codex-array-'));
   const target = path.join(dir, 'rollout-array.jsonl');
   writeFileSync(target, [
@@ -83,7 +83,7 @@ test('custom_tool_call_output 的 content block 数组转文本', async () => {
   assert.equal(p.messages[0].toolResults[0].output, 'a\nb');
 });
 
-test('末尾半行与未知事件被跳过', async () => {
+test('skips trailing partial lines and unknown events', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-codex-extra-'));
   const target = path.join(dir, 'rollout-x.jsonl');
   copyFileSync(rollout, target);

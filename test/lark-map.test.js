@@ -11,7 +11,7 @@ function writeCatalog(root, profile, entries) {
   writeFileSync(path.join(dir, 'sessions.json.catalog.json'), JSON.stringify(entries));
 }
 
-test('读取 claude/codex catalog 并建立映射', async () => {
+test('reads claude/codex catalogs and builds the mapping', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'session-hub-lark-'));
   writeCatalog(root, 'claude', [{ scopeId: 'oc_A', agentId: 'claude', sessionId: 's1' }]);
   writeCatalog(root, 'codex', [{ scopeId: 'oc_B', agentId: 'codex', threadId: 't1' }]);
@@ -21,7 +21,7 @@ test('读取 claude/codex catalog 并建立映射', async () => {
   assert.equal(map.get('codex:t1'), 'oc_B');
 });
 
-test('catalog 缺失或损坏返回空映射而不抛错', async () => {
+test('returns an empty map without throwing when the catalog is missing or corrupt', async () => {
   const missing = mkdtempSync(path.join(tmpdir(), 'session-hub-lark-'));
   assert.equal((await buildChatMap({ roots: { larkChannel: missing } })).size, 0);
 
@@ -32,7 +32,7 @@ test('catalog 缺失或损坏返回空映射而不抛错', async () => {
   assert.equal((await buildChatMap({ roots: { larkChannel: broken } })).size, 0);
 });
 
-test('dsh 目录名提取 chatId', () => {
+test('extracts chatId from dsh directory names', () => {
   assert.equal(chatIdFromDshDir('lark-oc_ABC123'), 'oc_ABC123');
   assert.equal(chatIdFromDshDir('lark-oc_ABC123--800327b4cf'), 'oc_ABC123');
   assert.equal(chatIdFromDshDir('session-abc'), null);
