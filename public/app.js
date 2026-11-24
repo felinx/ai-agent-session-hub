@@ -9,14 +9,36 @@ const state = {
   sessions: [],
   facets: { agents: [], chats: [], cwds: [] },
   detailSignature: null,
+  listSignature: null,
   loadingSessions: false
 };
 
-const collapsedProjects = new Set();
-const collapsedSections = new Set();
+const STORAGE_PREFIX = 'session-hub:';
+
+function loadKeySet(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? '[]');
+    return new Set(Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveKeySet(key, set) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...set]));
+  } catch {}
+}
+
+// 项目默认全部收起；记住用户展开过的项目与手动收起的区块。
+const expandedProjects = loadKeySet(`${STORAGE_PREFIX}expanded-projects`);
+const closedSections = loadKeySet(`${STORAGE_PREFIX}closed-sections`);
 
 const FOLDER_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
   '<path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.6c.4 0 .78.16 1.06.44L10.1 5.9H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>';
+
+const CHEVRON_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M6 4l4 4-4 4"/></svg>';
 
 const $ = (selector) => document.querySelector(selector);
 const listEl = $('#session-list');
@@ -166,16 +188,21 @@ function projectLabel(cwd) {
 }
 
 function sidebarSection(label, bodyNode) {
+  const key = `${STORAGE_PREFIX}closed-sections`;
   const details = el('details', {
     class: 'section',
-    ...(collapsedSections.has(label) ? {} : { open: '' })
+    ...(closedSections.has(label) ? {} : { open: '' })
   }, [
-    el('summary', { class: 'section-head', text: label }),
+    el('summary', { class: 'section-head' }, [
+      label,
+      el('span', { class: 'chevron', html: CHEVRON_ICON })
+    ]),
     bodyNode
   ]);
   details.addEventListener('toggle', () => {
-    if (details.open) collapsedSections.delete(label);
-    else collapsedSections.add(label);
+    if (details.open) closedSections.delete(label);
+    else closedSections.add(label);
+    saveKeySet(key, closedSections);
   });
   return el('li', { class: 'sidebar-section' }, [details]);
 }
@@ -184,17 +211,19 @@ function projectNode(group) {
   const key = group.cwd ?? '';
   const details = el('details', {
     class: 'project',
-    ...(collapsedProjects.has(key) ? {} : { open: '' })
+    ...(expandedProjects.has(key) ? { open: '' } : {})
   }, [
     el('summary', { class: 'project-head' }, [
       el('span', { class: 'project-icon', html: FOLDER_ICON }),
-      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) })
+      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) }),
+      el('span', { class: 'chevron', html: CHEVRON_ICON })
     ]),
     el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
   ]);
   details.addEventListener('toggle', () => {
-    if (details.open) collapsedProjects.delete(key);
-    else collapsedProjects.add(key);
+    if (details.open) expandedProjects.add(key);
+    else expandedProjects.delete(key);
+    saveKeySet(`${STORAGE_PREFIX}expanded-projects`, expandedProjects);
   });
   return el('li', { class: 'project-group' }, [details]);
 }
@@ -244,7 +273,13 @@ async function loadSessions() {
     errorEl.hidden = true;
     renderChips();
     renderFilters();
-    renderList();
+    const listSignature = state.sessions
+      .map(session => `${session.key}:${session.updatedAt}:${session.title}`)
+      .join('\n');
+    if (listSignature !== state.listSignature) {
+      state.listSignature = listSignature;
+      renderList();
+    }
     statusEl.textContent = statusLine(health);
     statusEl.title = health?.warnings?.join('\n') ?? '';
   } catch (error) {
