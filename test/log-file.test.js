@@ -76,3 +76,24 @@ test('createLogStore clear removes only its own log files', () => {
 
   assert.deepEqual(readdirSync(dir), ['notes.txt']);
 });
+
+test('the retention window follows the calendar across DST changes', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-log-'));
+  writeFileSync(path.join(dir, 'hub-2026-10-03.log'), 'x');
+
+  const original = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  try {
+    const store = createLogStore({
+      dir,
+      now: () => new Date(2026, 10, 2, 23, 30),
+      keepDays: 30
+    });
+    store.prune();
+  } finally {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  }
+
+  assert.deepEqual(readdirSync(dir), ['hub-2026-10-03.log']);
+});

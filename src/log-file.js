@@ -1,8 +1,6 @@
 import { mkdirSync, appendFileSync, statSync, readdirSync, unlinkSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 function pad(value) {
   return String(value).padStart(2, '0');
 }
@@ -39,7 +37,9 @@ export function createLogStore({ dir, baseName = 'hub', maxBytes = 10 * 1024 * 1
   }
 
   function prune() {
-    const cutoff = dateKey(new Date(now().getTime() - keepDays * DAY_MS));
+    // Calendar subtraction, so a DST change does not shift the cutoff by a day.
+    const current = now();
+    const cutoff = dateKey(new Date(current.getFullYear(), current.getMonth(), current.getDate() - keepDays));
     for (const file of logFiles()) {
       if (file.date < cutoff) {
         try { unlinkSync(path.join(dir, file.name)); } catch {}
