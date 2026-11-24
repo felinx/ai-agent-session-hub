@@ -57,6 +57,7 @@ npm start -- --rebuild
 - 默认隐藏 0 条消息的空会话，以及 cwd 位于 `/tmp`、`/private/tmp`（含子目录）的临时会话；API 加 `includeHidden=1` 可查看
 - 全文搜索（SQLite FTS5 trigram；少于 3 个字符时自动回退到 `LIKE`）
 - 会话详情：消息顺序、thinking、工具调用与工具结果（折叠展示）；消息、思考与工具内容按 Markdown 渲染，JSON 内容自动缩进格式化
+- 每条消息，以及消息内的思考、工具调用、工具结果都提供一键复制按钮（复制原始文本，不复制渲染后的 HTML）
 - 排除辅助会话：Codex 的 `onboarding_checklist`（首次引导清单）不出现在会话列表中
 - 每 5 秒自动刷新会话列表，详情随会话内容变化刷新
 - 过滤条件与选中会话记录在 URL hash，刷新后保留

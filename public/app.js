@@ -1,5 +1,6 @@
 import { renderMarkdown, formatMaybeJson } from './format.js';
 import { groupSessionsByProject } from './group.js';
+import { messagePlainText, toolResultPlainText } from './copy.js';
 
 const state = {
   agent: 'all',
@@ -76,6 +77,54 @@ function agentIcon(agent, alt = '') {
     src: `/icons/${agent}.png`,
     alt
   });
+}
+
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function copyButton(readText) {
+  let timer;
+  const button = el('button', {
+    class: 'copy-btn',
+    type: 'button',
+    title: '复制这段内容',
+    'aria-label': '复制',
+    onclick: async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const text = typeof readText === 'function' ? readText() : readText;
+      const ok = await copyToClipboard(text ?? '');
+      button.textContent = ok ? '已复制' : '复制失败';
+      button.classList.toggle('copied', ok);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        button.textContent = '复制';
+        button.classList.remove('copied');
+      }, 1500);
+    }
+  }, ['复制']);
+  return button;
 }
 
 function relativeTime(ms) {  if (!ms) return '未知时间';
@@ -296,8 +345,11 @@ async function loadSessions() {
   }
 }
 
-function detailsBlock(summary, bodyNode) {
-  return el('details', {}, [el('summary', { text: summary }), bodyNode]);
+function detailsBlock(summary, bodyNode, copyText) {
+  return el('details', {}, [
+    el('summary', { class: 'detail-toggle' }, [summary, copyButton(copyText)]),
+    bodyNode
+  ]);
 }
 
 // renderMarkdown 先转义全部文本，只产出受控标签；这里注入的 HTML 不含未转义的用户输入。
@@ -328,7 +380,11 @@ function renderMessage(message) {
   const body = el('div', { class: 'message-body' });
 
   if (message.thinking) {
-    body.append(detailsBlock('思考', markdownBlock(message.thinking, 'thinking')));
+    body.append(detailsBlock(
+      '思考',
+      markdownBlock(message.thinking, 'thinking'),
+      message.thinking
+    ));
   }
   if (message.text) {
     body.append(markdownBlock(message.text, 'message-text'));
@@ -336,20 +392,23 @@ function renderMessage(message) {
   for (const call of message.toolCalls ?? []) {
     body.append(detailsBlock(
       `工具调用 · ${call.name ?? 'unknown'}`,
-      el('pre', { class: 'tool', text: jsonText(call.input) })
+      el('pre', { class: 'tool', text: jsonText(call.input) }),
+      jsonText(call.input)
     ));
   }
   for (const result of message.toolResults ?? []) {
     body.append(detailsBlock(
       `工具结果${result.isError ? ' · 错误' : ''}`,
-      renderToolResult(result)
+      renderToolResult(result),
+      () => toolResultPlainText(result)
     ));
   }
 
   return el('article', { class: `message ${message.role}` }, [
     el('div', { class: 'message-head' }, [
       el('span', { class: 'badge', text: role }),
-      el('span', { class: 'message-time', text: message.at ? formatTime(message.at) : '' })
+      el('span', { class: 'message-time', text: message.at ? formatTime(message.at) : '' }),
+      copyButton(() => messagePlainText(message))
     ]),
     body
   ]);
