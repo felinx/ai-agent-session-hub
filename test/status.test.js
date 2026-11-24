@@ -103,3 +103,16 @@ test('formatStatus prints live and stopped summaries', () => {
   assert.match(empty, /stopped/);
   assert.match(empty, /No sessions synced yet/);
 });
+
+test('hub URLs bracket IPv6 hosts and hide wildcard binds', async () => {
+  const { hubUrl } = await import('../src/status.js');
+  assert.equal(hubUrl('::1', 7317), 'http://[::1]:7317');
+  assert.equal(hubUrl('0.0.0.0', 7317), 'http://127.0.0.1:7317');
+  assert.equal(hubUrl('127.0.0.1', 7317), 'http://127.0.0.1:7317');
+
+  const lines = formatStatus({
+    running: true, host: '::1', port: 7317, source: 'http', lastSyncAt: null,
+    totals: { sessions: 0, messages: 0 }, agents: []
+  });
+  assert.match(lines, /http:\/\/\[::1\]:7317/);
+});

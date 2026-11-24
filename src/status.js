@@ -12,9 +12,11 @@ function formatTime(ms) {
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-// A wildcard bind is not an address clients can connect to.
-function queryHost(host) {
-  return !host || host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+// A wildcard bind is not an address clients can connect to; IPv6 literals need brackets.
+export function hubUrl(host, port) {
+  const address = !host || host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+  const bracketed = address.includes(':') && !address.startsWith('[') ? `[${address}]` : address;
+  return `http://${bracketed}:${port}`;
 }
 
 function totalsOf(agents) {
@@ -27,10 +29,10 @@ function totalsOf(agents) {
 // Ask the running hub first; if it does not answer, read the local copy directly so
 // status still works while the daemon is stopped. Never creates the database.
 export async function collectStatus({ config, timeoutMs = 1500 }) {
-  const host = queryHost(config.host);
+  const host = config.host;
 
   try {
-    const res = await fetch(`http://${host}:${config.port}/api/status`, {
+    const res = await fetch(`${hubUrl(host, config.port)}/api/status`, {
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (res.ok) {
@@ -88,7 +90,7 @@ export function formatStatus(status) {
   const lines = [];
 
   if (status.running) {
-    lines.push(`Status:   running on http://${status.host}:${status.port}`);
+    lines.push(`Status:   running on ${hubUrl(status.host, status.port)}`);
   } else {
     lines.push(`Status:   stopped (port ${status.port})`);
     if (status.source === 'db') {
