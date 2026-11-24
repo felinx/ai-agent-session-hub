@@ -1,83 +1,58 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stamp, formatDuration, formatClock, hasChanges, describeSync } from '../src/log.js';
+import { stamp, describeSync } from '../src/log.js';
 
 const base = { added: 0, updated: 0, unchanged: 4, removed: 0, changes: [], total: 4, byAgent: [] };
+const now = new Date(2026, 10, 24, 13, 20, 5);
 
 test('stamp outputs local time as YYYY-MM-DD HH:mm:ss', () => {
   assert.equal(stamp(new Date(2026, 10, 24, 9, 5, 3)), '[2026-11-24 09:05:03]');
 });
 
-test('formatDuration distinguishes milliseconds, seconds, and minutes', () => {
-  assert.equal(formatDuration(820), '820ms');
-  assert.equal(formatDuration(1420), '1.4s');
-  assert.equal(formatDuration(125000), '2m5s');
-});
-
-test('formatClock outputs local time to the minute and shows a placeholder for empty values', () => {
-  assert.equal(formatClock(new Date(2026, 10, 24, 13, 8, 40).getTime()), '2026-11-24 13:08');
-  assert.equal(formatClock(null), '—');
-});
-
-test('hasChanges is true only when added, updated, or removed counts are nonzero', () => {
-  assert.equal(hasChanges(base), false);
-  assert.equal(hasChanges({ ...base, added: 1 }), true);
-  assert.equal(hasChanges({ ...base, updated: 1 }), true);
-  assert.equal(hasChanges({ ...base, removed: 1 }), true);
-  assert.equal(hasChanges({ ...base, unchanged: 9 }), false);
-});
-
-test('describeSync summarizes on one line and lists each session change with a timestamp', () => {
-  const now = new Date(2026, 10, 24, 13, 20, 5);
+test('describeSync prints one line per change with the session id and a one-line summary', () => {
   const lines = describeSync({
+    ...base,
     added: 1,
     updated: 1,
-    unchanged: 2,
-    removed: 0,
-    total: 118,
-    byAgent: [{ agent: 'claude', count: 92 }, { agent: 'dsh', count: 26 }],
     changes: [
-      { kind: 'added', agent: 'dsh', title: '询问自身大模型身份', messages: 12, updatedAt: new Date(2026, 10, 24, 13, 18).getTime() },
-      { kind: 'updated', agent: 'claude', title: 'README 重构', messages: 40, updatedAt: new Date(2026, 10, 24, 12, 1).getTime() }
+      { kind: 'added', agent: 'dsh', id: '1a2b3c4d', summary: '询问自身大模型身份' },
+      { kind: 'updated', agent: 'claude', id: '8f2a1c3d', summary: 'README 重构' }
     ]
-  }, 'zh', { now, elapsedMs: 820 });
+  }, 'zh', { now });
 
-  assert.equal(lines.length, 3);
-  assert.equal(
-    lines[0],
-    '[2026-11-24 13:20:05] 同步完成 · 用时 820ms · 新增 1 · 更新 1 · 移除 0 · 共 118 个会话（claude 92 · dsh 26）'
-  );
-  assert.equal(
-    lines[1],
-    '[2026-11-24 13:20:05]   + [dsh] 询问自身大模型身份 · 12 条消息 · 更新于 2026-11-24 13:18'
-  );
-  assert.equal(
-    lines[2],
-    '[2026-11-24 13:20:05]   ~ [claude] README 重构 · 40 条消息 · 更新于 2026-11-24 12:01'
-  );
+  assert.deepEqual(lines, [
+    '[2026-11-24 13:20:05]   + [dsh] 1a2b3c4d 询问自身大模型身份',
+    '[2026-11-24 13:20:05]   ~ [claude] 8f2a1c3d README 重构'
+  ]);
 });
 
-test('describeSync outputs only the summary line when there are no changes', () => {
-  const lines = describeSync(base, 'en', { now: new Date(2026, 10, 24, 13, 20, 5), elapsedMs: 120 });
-  assert.deepEqual(lines, ['[2026-11-24 13:20:05] sync done · 120ms · 0 added, 0 updated, 0 removed · 4 sessions']);
+test('describeSync prints nothing when nothing changed', () => {
+  assert.deepEqual(describeSync(base, 'en', { now }), []);
 });
 
-test('describeSync omits message count and update time for removed sessions', () => {
+test('describeSync marks a session as having no text when the summary is empty', () => {
+  const lines = describeSync({
+    ...base,
+    added: 1,
+    changes: [{ kind: 'added', agent: 'codex', id: 'deadbeef', summary: '' }]
+  }, 'zh', { now });
+  assert.deepEqual(lines, ['[2026-11-24 13:20:05]   + [codex] deadbeef （无文本内容）']);
+});
+
+test('describeSync lists removed sessions by id without a summary', () => {
   const lines = describeSync({
     ...base,
     removed: 1,
-    changes: [{ kind: 'removed', agent: 'codex', title: '旧实验' }]
-  }, 'zh', { now: new Date(2026, 10, 24, 13, 20, 5), elapsedMs: 10 });
-  assert.equal(lines[1], '[2026-11-24 13:20:05]   - [codex] 旧实验 · 已从来源移除');
+    changes: [{ kind: 'removed', agent: 'codex', id: 'c0ffee00' }]
+  }, 'zh', { now });
+  assert.deepEqual(lines, ['[2026-11-24 13:20:05]   - [codex] c0ffee00']);
 });
 
-test('describeSync limits detail lines and reports remaining changes', () => {
+test('describeSync limits change lines and reports how many are left', () => {
   const changes = Array.from({ length: 5 }, (_, i) => ({
-    kind: 'added', agent: 'claude', title: `会话 ${i}`, messages: 1, updatedAt: Date.now()
+    kind: 'added', agent: 'claude', id: `0000000${i}`, summary: `会话 ${i}`
   }));
-  const lines = describeSync({ ...base, added: 5, changes }, 'zh', {
-    now: new Date(2026, 10, 24, 13, 20, 5), elapsedMs: 5, limit: 2
-  });
-  assert.equal(lines.length, 4);
-  assert.match(lines[3], /另有 3 个会话变化/);
+  const lines = describeSync({ ...base, added: 5, changes }, 'zh', { now, limit: 2 });
+  assert.equal(lines.length, 3);
+  assert.match(lines[2], /另有 3 个会话变化/);
 });

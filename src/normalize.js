@@ -40,6 +40,13 @@ export function truncate(text, n) {
   return text.slice(0, n);
 }
 
+// First non-empty trimmed line, truncated — used for log and status one-line summaries.
+export function oneLine(text, limit = 100) {
+  if (typeof text !== 'string') return '';
+  const line = text.split('\n').map(part => part.trim()).find(part => part !== '') ?? '';
+  return line.slice(0, limit);
+}
+
 export function deriveTitle(text, fallback = '') {
   const stripped = stripBridgeContext(text);
   const line = stripped.split('\n').map(l => l.trim()).find(l => l !== '') ?? '';

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   textFromContent, stripBridgeContext, isSyntheticUserText,
-  deriveTitle, toEpochMs, truncate
+  deriveTitle, toEpochMs, truncate, oneLine
 } from '../src/normalize.js';
 
 test('textFromContent joins text blocks', () => {
@@ -48,4 +48,12 @@ test('truncate keeps only the first n characters', () => {
   assert.equal(truncate('abcdef', 3), 'abc');
   assert.equal(truncate('ab', 3), 'ab');
   assert.equal(truncate('', 3), '');
+});
+
+test('oneLine keeps the first non-empty line and truncates it', () => {
+  assert.equal(oneLine('第一行\n第二行'), '第一行');
+  assert.equal(oneLine('\n\n  hello  \nworld'), 'hello');
+  assert.equal(oneLine('x'.repeat(200)).length, 100);
+  assert.equal(oneLine('x'.repeat(200), 10), 'x'.repeat(10));
+  assert.equal(oneLine(null), '');
 });

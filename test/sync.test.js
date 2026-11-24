@@ -10,6 +10,7 @@ import { zstdCompressSync } from 'node:zlib';
 import { openDb, initSchema, listSessions } from '../src/db.js';
 import { saveSettings } from '../src/settings.js';
 import { syncOnce } from '../src/sync.js';
+import { sessionId } from '../src/session-id.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const CLAUDE_ID = '11111111-1111-4111-8111-111111111111';
@@ -72,6 +73,15 @@ test('first sync writes sessions from all four sources', async () => {
   const r = await syncOnce(db, config);
   assert.equal(r.added, 4);
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 4);
+});
+
+test('change records carry the session id and the latest message summary', async () => {
+  const { db, config } = setup();
+  const r = await syncOnce(db, config);
+  const dsh = r.changes.find(change => change.agent === 'dsh');
+  assert.equal(dsh.kind, 'added');
+  assert.equal(dsh.id, sessionId('dsh:session-33333333-3333-4333-8333-333333333333'));
+  assert.equal(dsh.summary, '好的');
 });
 
 test('second sync with no changes reports everything as unchanged', async () => {

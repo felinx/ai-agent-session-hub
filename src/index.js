@@ -8,7 +8,7 @@ import { syncOnce } from './sync.js';
 import { createServer } from './server.js';
 import { getSettings } from './settings.js';
 import { formatWarning, resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
-import { stamp, describeSync, hasChanges } from './log.js';
+import { stamp, describeSync } from './log.js';
 
 const config = loadConfig();
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -29,16 +29,11 @@ function currentLanguage() {
 
 let syncing = false;
 let forceNext = config.rebuild;
-let lastQuietLogAt = 0;
-// Syncs run every 5 seconds. Detail lines are printed on every change or warning;
-// when nothing changes only a heartbeat at most once every 5 minutes.
-const QUIET_LOG_INTERVAL_MS = 5 * 60_000;
 
 async function runSync() {
   if (syncing) return;
   syncing = true;
   state.scanning = true;
-  const startedAt = Date.now();
 
   try {
     const result = await syncOnce(db, config, { force: forceNext });
@@ -50,14 +45,9 @@ async function runSync() {
     for (const warning of result.warnings) {
       console.warn(`${stamp()} ${formatWarning(lang, warning)}`);
     }
-
-    const now = new Date();
-    const quiet = !hasChanges(result);
-    if (!quiet || now.getTime() - lastQuietLogAt >= QUIET_LOG_INTERVAL_MS) {
-      for (const line of describeSync(result, lang, { now, elapsedMs: now.getTime() - startedAt })) {
-        console.log(line);
-      }
-      if (quiet) lastQuietLogAt = now.getTime();
+    // Only real changes produce output; the status page covers the overall picture.
+    for (const line of describeSync(result, lang)) {
+      console.log(line);
     }
   } catch (error) {
     const message = String(error?.message ?? error);

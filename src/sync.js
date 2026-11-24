@@ -6,6 +6,8 @@ import { discoverWorkbuddy, parseWorkbuddy } from './sources/workbuddy.js';
 import { buildChatMap } from './sources/larkMap.js';
 import { getSyncState, hasSession, replaceSession, pruneMissing } from './db.js';
 import { getSettings } from './settings.js';
+import { sessionId } from './session-id.js';
+import { oneLine } from './normalize.js';
 
 const SOURCES = [
   { agent: 'claude', discover: discoverClaude, parse: parseClaude },
@@ -28,6 +30,15 @@ function resetLegacyNormalizedWorkbuddySessions(db) {
       WHERE agent = 'workbuddy' AND cwd = 'workbuddy-default'
     )
   `).run();
+}
+
+// One-line brief of what the session last talked about: the latest non-empty message text.
+function latestSummary(messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const text = messages[i]?.text;
+    if (typeof text === 'string' && text.trim() !== '') return oneLine(text, 80);
+  }
+  return '';
 }
 
 export async function syncOnce(db, config, opts = {}) {
@@ -117,9 +128,8 @@ export async function syncOnce(db, config, opts = {}) {
       changes.push({
         kind: isUpdate ? 'updated' : 'added',
         agent: file.agent,
-        title: session.title || session.nativeId,
-        messages: session.messageCount,
-        updatedAt: session.updatedAt
+        id: sessionId(key),
+        summary: latestSummary(parsed.messages)
       });
 
       replaceSession(db, session, parsed.messages, {
@@ -134,7 +144,7 @@ export async function syncOnce(db, config, opts = {}) {
     const removedSessions = pruneMissing(db, new Set(discovered.map(file => file.sourcePath)));
     removed = removedSessions.length;
     for (const session of removedSessions) {
-      changes.push({ kind: 'removed', agent: session.agent, title: session.title || session.key });
+      changes.push({ kind: 'removed', agent: session.agent, id: sessionId(session.key) });
     }
   }
 
