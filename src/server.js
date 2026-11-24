@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { createHash } from 'node:crypto';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat, open } from 'node:fs/promises';
 import path from 'node:path';
 import {
   listSessions, getSession, getSessionCwd, getFacets, countVisibleSessions
@@ -38,6 +38,37 @@ const ASSET_MIME = {
   '.svg': 'image/svg+xml'
 };
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+const MAX_FILE_BYTES = 1024 * 1024;
+const BINARY_SAMPLE_BYTES = 8192;
+
+// 文件查看器只读取常规文本文件（超过 1MB 截断），二进制内容不返回正文。
+async function readLocalFile(target) {
+  try {
+    const real = await realpath(target);
+    const info = await stat(real);
+    if (!info.isFile()) return null;
+    const length = Math.min(info.size, MAX_FILE_BYTES);
+    const handle = await open(real, 'r');
+    let buffer;
+    try {
+      buffer = Buffer.alloc(length);
+      if (length > 0) await handle.read(buffer, 0, length, 0);
+    } finally {
+      await handle.close();
+    }
+    const binary = buffer.subarray(0, BINARY_SAMPLE_BYTES).includes(0);
+    return {
+      path: real,
+      name: path.basename(real),
+      size: info.size,
+      truncated: info.size > MAX_FILE_BYTES,
+      binary,
+      content: binary ? '' : buffer.toString('utf8')
+    };
+  } catch {
+    return null;
+  }
+}
 
 // 只读取会话 cwd 内的图片文件：解析真实路径后仍必须位于 cwd 内，
 // 这样 ../、绝对路径和符号链接都无法逃逸到目录之外。
@@ -240,6 +271,23 @@ export function createServer({
           lastSyncAt: state?.lastSyncAt ?? null,
           warnings: (state?.warnings ?? []).map(warning => formatWarning(lang, warning))
         });
+      }
+
+      if (pathname === '/api/file') {
+        const requested = url.searchParams.get('path');
+        if (!requested) return sendError(res, 400, lang, 'error.pathRequired');
+        let target;
+        if (path.isAbsolute(requested)) {
+          target = requested;
+        } else {
+          const sessionKey = url.searchParams.get('session');
+          const cwd = sessionKey ? getSessionCwd(db, sessionKey) : null;
+          if (!cwd) return sendError(res, 400, lang, 'error.sessionRequired');
+          target = path.resolve(cwd, requested);
+        }
+        const file = await readLocalFile(target);
+        if (!file) return sendError(res, 404, lang, 'error.fileNotFound');
+        return sendJson(res, 200, file);
       }
 
       if (pathname === '/api/sessions') {

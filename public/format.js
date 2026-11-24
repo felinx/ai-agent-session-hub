@@ -1,6 +1,8 @@
 // 安全的前端渲染工具：先转义，再应用受控的 Markdown 子集。
 // 本模块不依赖浏览器 API，可直接被 Node 测试导入。
 
+import { isLocalFilePath } from './links.js';
+
 const INLINE_CODE_PLACEHOLDER_RE = /\u0000(\d+)\u0000/g;
 const SAFE_HREF_RE = /^(https?:\/\/|mailto:|\/|\.\/|#)/i;
 
@@ -28,6 +30,9 @@ function renderInline(escaped) {
     return `<img class="message-image" data-image-src="${src}" alt="${alt}" loading="lazy">`;
   });
   text = text.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
+    if (isLocalFilePath(href)) {
+      return `<a class="file-link" data-file-href="${href}" title="${href}">${label}</a>`;
+    }
     if (!SAFE_HREF_RE.test(href)) return match;
     return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
   });

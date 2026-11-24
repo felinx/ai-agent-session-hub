@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>File viewer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="viewer-body">
+  <header class="viewer-head">
+    <div class="viewer-title-row">
+      <h1 id="file-name">File viewer</h1>
+      <span id="file-meta" class="viewer-meta"></span>
+      <a id="viewer-back" class="settings-back" href="/">
+        <span class="back-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"></path></svg></span>
+        <span id="viewer-back-label">Back to sessions</span>
+      </a>
+    </div>
+    <div id="file-path" class="viewer-path"></div>
+    <div id="notice" class="viewer-notice" hidden></div>
+  </header>
+  <main id="file-content" class="viewer-content">
+    <p class="empty">Loading…</p>
+  </main>
+  <script type="module" src="/viewer.js"></script>
+</body>
+</html>

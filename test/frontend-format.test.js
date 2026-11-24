@@ -75,3 +75,20 @@ test('renderMarkdown 转义图片 alt 中的标签', () => {
   assert.equal(html.includes('<script>'), false);
   assert.match(html, /alt="&lt;script&gt;x&lt;\/script&gt;"/);
 });
+
+test('renderMarkdown 把本地文件链接标记为可在浏览器查看', () => {
+  const html = renderMarkdown('[cordis.patch.yml:58-62](/Users/felinx/.dsh/profiles/desktop/cordis.patch.yml#L58-L62)');
+  assert.match(html, /<a class="file-link" data-file-href="\/Users\/felinx\/\.dsh\/profiles\/desktop\/cordis\.patch\.yml#L58-L62"/);
+  assert.match(html, />cordis\.patch\.yml:58-62<\/a>/);
+  assert.doesNotMatch(html, /<a href="\/Users/);
+});
+
+test('renderMarkdown 保留锚点与相对文件链接的区分', () => {
+  const anchor = renderMarkdown('[跳到说明](#说明)');
+  assert.match(anchor, /<a href="#说明"/);
+  assert.equal(anchor.includes('data-file-href'), false);
+
+  const file = renderMarkdown('[说明](docs/README.md)');
+  assert.match(file, /data-file-href="docs\/README\.md"/);
+  assert.doesNotMatch(file, /<a href="docs/);
+});

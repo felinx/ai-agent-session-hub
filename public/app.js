@@ -4,6 +4,7 @@ import { messagePlainText, toolResultPlainText } from './copy.js';
 import { t, resolveLanguage } from './i18n.js';
 import { jumpButtonState, jumpScrollBehavior } from './scroll.js';
 import { resolveImageSource } from './images.js';
+import { viewerUrl } from './links.js';
 
 const state = {
   agent: 'all',
@@ -496,7 +497,21 @@ function markdownBlock(text, className) {
   if (!html) return el('div', { class: className, text });
   const block = el('div', { class: `${className} markdown`, html });
   hydrateImages(block);
+  hydrateFileLinks(block);
   return block;
+}
+
+// 本地文件链接在渲染后补上查看页地址，并保留 #L58-L62 这类行号片段。
+function hydrateFileLinks(container) {
+  for (const link of container.querySelectorAll('a[data-file-href]')) {
+    const href = link.dataset.fileHref;
+    link.removeAttribute('data-file-href');
+    const url = viewerUrl(state.selected, href);
+    if (!url) continue;
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  }
 }
 
 const MISSING_IMAGE_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +

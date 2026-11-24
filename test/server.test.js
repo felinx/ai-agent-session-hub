@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openDb, initSchema, replaceSession } from '../src/db.js';
@@ -425,4 +425,40 @@ test('静态资源内容变化后版本号随之变化', async (t) => {
   assert.ok(before);
   writeFileSync(path.join(s.publicDir, 'style.css'), 'body{color:blue;padding:0}');
   assert.notEqual(await versionOf(), before);
+});
+
+test('GET /api/file 以只读方式返回本地文件内容', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'sh-file-'));
+  const textFile = path.join(dir, 'notes.md');
+  writeFileSync(textFile, 'line1\nline2\n');
+  const binaryFile = path.join(dir, 'blob.bin');
+  writeFileSync(binaryFile, Buffer.from([0x00, 0x01, 0x02, 0x00]));
+  const bigFile = path.join(dir, 'big.txt');
+  writeFileSync(bigFile, 'a'.repeat(1024 * 1024 + 10));
+
+  const s = await makeServer(db => seedSessionWithCwd(db, 'claude:files', dir));
+  t.after(() => s.close());
+
+  const absolute = await (await fetch(s.base + '/api/file?path=' + encodeURIComponent(textFile))).json();
+  assert.equal(absolute.content, 'line1\nline2\n');
+  assert.equal(absolute.binary, false);
+  assert.equal(absolute.truncated, false);
+  assert.equal(absolute.path, realpathSync(textFile));
+  assert.equal(absolute.name, 'notes.md');
+
+  const relative = await (await fetch(s.base + '/api/file?path=notes.md&session=claude%3Afiles')).json();
+  assert.equal(relative.content, 'line1\nline2\n');
+
+  assert.equal((await fetch(s.base + '/api/file?path=notes.md')).status, 400);
+  assert.equal((await fetch(s.base + '/api/file?path=missing.md&session=claude%3Afiles')).status, 404);
+  assert.equal((await fetch(s.base + '/api/file?path=' + encodeURIComponent(dir))).status, 404);
+  assert.equal((await fetch(s.base + '/api/file')).status, 400);
+
+  const binary = await (await fetch(s.base + '/api/file?path=' + encodeURIComponent(binaryFile))).json();
+  assert.equal(binary.binary, true);
+  assert.equal(binary.content, '');
+
+  const big = await (await fetch(s.base + '/api/file?path=' + encodeURIComponent(bigFile))).json();
+  assert.equal(big.truncated, true);
+  assert.equal(big.content.length, 1024 * 1024);
 });
