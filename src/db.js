@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, chmodSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { sessionId } from './session-id.js';
+import { oneLine } from './normalize.js';
 
 const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const dbPaths = new WeakMap();
@@ -322,3 +323,31 @@ export function getFacets(db, options = {}) {
   };
 }
 
+// Per-agent overview for the status page: totals plus the newest session and a
+// one-line summary of its latest non-empty message.
+export function getAgentStats(db) {
+  const rows = db.prepare(`
+    SELECT agent, count(*) AS sessions, coalesce(sum(message_count), 0) AS messages,
+           max(updated_at) AS lastSyncAt
+    FROM sessions GROUP BY agent ORDER BY agent
+  `).all();
+
+  const latestRow = db.prepare(
+    `SELECT ${SESSION_COLUMNS} FROM sessions WHERE agent = ? ORDER BY updated_at DESC LIMIT 1`
+  );
+  const lastText = db.prepare(`
+    SELECT text FROM messages
+    WHERE session_key = ? AND text IS NOT NULL AND trim(text) <> ''
+    ORDER BY seq DESC LIMIT 1
+  `);
+
+  return rows.map(row => {
+    const latest = latestRow.get(row.agent);
+    if (!latest) return { ...row, latest: null };
+    const message = lastText.get(latest.key);
+    return {
+      ...row,
+      latest: { ...toSession(latest), summary: oneLine(message?.text ?? '') }
+    };
+  });
+}

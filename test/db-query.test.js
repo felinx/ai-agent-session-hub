@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb, initSchema, replaceSession } from '../src/db.js';
-import { listSessions, getSession, getFacets } from '../src/db.js';
+import { listSessions, getSession, getFacets, getAgentStats } from '../src/db.js';
 
 function session(key, agent, nativeId, chatId, cwd, updatedAt, messageCount = 2) {
   return {
@@ -127,5 +127,30 @@ test('filter the list and facets by the set of enabled agents', () => {
     [{ agent: 'claude', count: 1 }]
   );
   assert.deepEqual(getFacets(db, { agents: [] }), { agents: [], chats: [], cwds: [] });
+  db.close();
+});
+
+test('getAgentStats reports per-agent counts and the latest session summary', () => {
+  const db = freshDb();
+  replaceSession(db, session('claude:d', 'claude', 'd', null, '/p1', 400), [
+    { role: 'user', text: '旧的问题' },
+    { role: 'assistant', text: '最新的回答\n第二行' }
+  ], { mtimeMs: 400, size: 1 });
+
+  const stats = getAgentStats(db);
+  const claude = stats.find(row => row.agent === 'claude');
+  assert.equal(claude.sessions, 2);
+  assert.equal(claude.messages, 4);
+  assert.equal(claude.lastSyncAt, 400);
+  assert.equal(claude.latest.key, 'claude:d');
+  assert.match(claude.latest.id, /^[0-9a-f]{8}$/);
+  assert.equal(claude.latest.summary, '最新的回答');
+
+  const codex = stats.find(row => row.agent === 'codex');
+  assert.deepEqual(
+    { sessions: codex.sessions, messages: codex.messages, summary: codex.latest.summary },
+    { sessions: 1, messages: 2, summary: '好的' }
+  );
+  assert.equal(getAgentStats(db).find(row => row.agent === 'dsh').latest.summary, '扩展这个库');
   db.close();
 });

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile, realpath, stat, open } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  listSessions, getSession, getSessionCwd, getFacets, countVisibleSessions
+  listSessions, getSession, getSessionCwd, getFacets, countVisibleSessions, getAgentStats
 } from './db.js';
 import { getSettings, saveSettings, SUPPORTED_AGENTS } from './settings.js';
 import { t, resolveLanguage, formatWarning, detectSystemLanguage } from '../public/i18n.js';
@@ -271,6 +271,19 @@ export function createServer({
           scanning: !!state?.scanning,
           lastSyncAt: state?.lastSyncAt ?? null,
           warnings: (state?.warnings ?? []).map(warning => formatWarning(lang, warning))
+        });
+      }
+
+      if (pathname === '/api/status') {
+        const agents = getAgentStats(db);
+        return sendJson(res, 200, {
+          scanning: !!state?.scanning,
+          lastSyncAt: state?.lastSyncAt ?? null,
+          agents,
+          totals: {
+            sessions: agents.reduce((sum, row) => sum + row.sessions, 0),
+            messages: agents.reduce((sum, row) => sum + row.messages, 0)
+          }
         });
       }
 

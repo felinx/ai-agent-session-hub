@@ -462,3 +462,24 @@ test('GET /api/file returns local file contents read-only', async (t) => {
   assert.equal(big.truncated, true);
   assert.equal(big.content.length, 1024 * 1024);
 });
+
+test('GET /api/status reports scan state and per-agent statistics', async (t) => {
+  const s = await makeServer();
+  s.state.lastSyncAt = 1234;
+  t.after(() => s.close());
+
+  const res = await fetch(s.base + '/api/status');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.scanning, false);
+  assert.equal(body.lastSyncAt, 1234);
+  assert.deepEqual(body.totals, { sessions: 2, messages: 4 });
+
+  const claude = body.agents.find(row => row.agent === 'claude');
+  assert.equal(claude.sessions, 1);
+  assert.equal(claude.messages, 2);
+  assert.equal(claude.lastSyncAt, 300);
+  assert.equal(claude.latest.key, 'claude:a');
+  assert.match(claude.latest.id, /^[0-9a-f]{8}$/);
+  assert.equal(claude.latest.summary, '我看一下');
+});
