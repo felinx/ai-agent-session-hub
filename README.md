@@ -2,16 +2,29 @@
 
 English | [中文](README.zh.md)
 
-A **read-only** local dashboard for the four AI coding agents you already run on this machine:
+**AI coding agents are getting better at doing the work and worse at letting you see it afterwards.** Claude Code, Codex, DeepSeek Harness, WorkBuddy and their peers each write sessions into their own hidden directory and format, with no graphical browser — once the terminal closes, finding "that one session" means grepping JSONL.
 
-- **Claude Code** — sessions under `~/.claude`
-- **Codex** — sessions under `~/.codex`
-- **DeepSeek Harness (dsh)** — sessions under `~/.dsh`
-- **WorkBuddy** (CodeBuddy-based, by Tencent) — sessions under `~/.workbuddy`
+Agent Session Hub reads those session files directly, parses them into one structure, and serves a single local, **read-only** page for browsing, searching, and filtering all of them. It needs **no bridge, plugin, or configuration inside the agents** — if the agent wrote its session files, Session Hub can show them.
 
-It reads each agent's own local session files, parses them into one structure, and serves a single page where you can browse, search, and filter all of them together. **No bridge, plugin, or configuration inside the agents is required** — if the agent wrote its session files, Session Hub can show them.
+Today it understands Claude Code, Codex, DeepSeek Harness (dsh), and WorkBuddy. The source list is deliberately open: adding another agent is one parser module, and the dashboard, database, search, and API stay the same.
+
+## Why Agent Session Hub
+
+### 1. A real interface for session history that only exists in CLIs
+
+Coding agents are terminal-first: sessions live as JSONL files in hidden directories, and the terminal that produced them is gone. Session Hub gives that history a proper view — messages, thinking, tool calls, and tool results rendered in the browser, with full-text search, project grouping, filters, copy buttons, a read-only file viewer for paths mentioned in sessions, and stable internal session ids. Nothing to install into the agents; the files they already write are enough.
+
+### 2. One place for all of your agents
+
+The more agents you run, the more your work spreads across Claude Code, Codex, dsh, WorkBuddy, and whatever comes next. A task started in one agent two days ago is easy to lose. Session Hub aggregates every source into one list grouped by project and sorted by recency, so you can answer "which agent was I using for this?" with one search instead of opening each agent's directory. Agent, project, time, and content are all filterable, and the local SQLite copy makes cross-agent search fast.
+
+### 3. A shared foundation for working across agents
+
+A single agent rarely sees what the others did. Once every session is parsed into the same structure — with a stable id, project, agent, and message history — sharing context between agents and routing tasks between them become tractable: one agent can look up what another already tried instead of you pasting transcripts around, and a scheduler can pick the agent best suited to the next task. Session Hub already provides the substrate for this (structured local copies, stable ids, a read-only JSON API); the cross-agent workflows themselves are the direction the project is built for, not a finished feature.
 
 ## Supported agents
+
+Each source is read where its agent writes it; nothing else is required.
 
 | Agent | Where sessions live | What is parsed |
 | --- | --- | --- |
@@ -24,7 +37,7 @@ It reads each agent's own local session files, parses them into one structure, a
 
 ## Optional: Lark/Feishu bridges (extra)
 
-None of the four agents needs a bridge. But if you happen to talk to them through one, Session Hub picks up the chat linkage as a bonus:
+None of the supported agents needs a bridge. But if you happen to talk to them through one, Session Hub picks up the chat linkage as a bonus:
 
 - [lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) (claude and codex profiles)
 - [dsh-lark-channel](https://github.com/JunguangJiang/dsh-lark-channel)
@@ -54,7 +67,7 @@ Source files are only `stat`-ed and read. Incremental sync decides whether a fil
 ## Requirements
 
 - Node.js **≥ 22.5** (uses built-in `node:sqlite` and `node:zlib` zstd support; no third-party dependencies)
-- At least one of the four agents' data directories on this machine. Missing sources only produce warnings and do not affect the others.
+- At least one supported agent's data directory on this machine. Missing sources only produce warnings and do not affect the others.
 
 ## Usage
 
@@ -89,7 +102,7 @@ npm start -- --rebuild
 - The sidebar shows two collapsible sections, **Projects** and **Recent**. Projects are grouped by working directory (groups and sessions sorted by most recent update); Recent lists all sessions in reverse chronological order. Each session shows only its title, agent, and time
 - All projects start collapsed. The open/closed state of the **Projects** and **Recent** sections and of each project is stored in browser localStorage, so it survives reloads and future visits
 - Sessions with 0 messages and temporary sessions whose cwd is under `/tmp` or `/private/tmp` (including subdirectories) are hidden by default; pass `includeHidden=1` to the API to see them
-- A **Settings** page at the bottom of the sidebar lets you toggle empty and temporary sessions independently, enable or disable each of the four agents, switch the interface language, and inspect the local database and source directories. Disabling an agent stops syncing and removes its local copy; re-enabling it reads the source files again
+- A **Settings** page at the bottom of the sidebar lets you toggle empty and temporary sessions independently, enable or disable each agent, switch the interface language, and inspect the local database and source directories. Disabling an agent stops syncing and removes its local copy; re-enabling it reads the source files again
 - A **Status** page next to Settings summarises every agent: session and message counts, the latest sync time, and for the newest session its internal id and a one-line summary of the latest message. Clicking it opens that session
 - Every session carries a stable internal **session id** (8 hex characters derived from the session key, so it survives `--rebuild`); the detail header shows it next to the agent
 - The background sync logs one line per changed session, `+ [agent] <session-id> <summary>`, and one line when a session disappears. Syncs that changed nothing print nothing — the Status page covers the overall picture
@@ -146,5 +159,5 @@ public/              Frontend dashboard
   images.js          Resolves session image paths to the asset endpoint
   app.js             Session list, detail, settings, status
   viewer.html/.js    Read-only file viewer with line numbers
-  icons/             Icons for the four agents
+  icons/             Agent icons
 ```

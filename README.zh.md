@@ -2,16 +2,29 @@
 
 [English](README.md) | 中文
 
-一个**只读**的本机看板，把你机器上已经在用的四个 AI Agent 的会话聚合到同一个页面：
+**AI 编码 Agent 越来越擅长干活，却越来越不方便让你事后看清它干了什么。** Claude Code、Codex、DeepSeek Harness、WorkBuddy 等工具各自把会话写进自己隐藏的目录和格式里，没有图形界面——终端一关，想找「那一次会话」就只能去 grep 一堆 JSONL。
 
-- **Claude Code** — 会话保存在 `~/.claude`
-- **Codex** — 会话保存在 `~/.codex`
-- **DeepSeek Harness（dsh）** — 会话保存在 `~/.dsh`
-- **WorkBuddy**（腾讯，CodeBuddy 内核）— 会话保存在 `~/.workbuddy`
+Agent Session Hub 直接读取这些会话文件，解析成统一结构，再提供一个本地、**只读**的页面集中浏览、搜索和筛选。**不需要 bridge、插件，也不需要改 Agent 里的任何配置**——只要 Agent 把会话写到了本地，Session Hub 就能展示。
 
-它直接读取每个 Agent 自己写的本地会话文件，解析成一数据结构，再用一个页面统一浏览、搜索和筛选。**不需要 bridge、插件，也不需要在 Agent 里做任何配置**——只要 Agent 把会话写到了本地，Session Hub 就能展示。
+目前支持 Claude Code、Codex、DeepSeek Harness（dsh）与 WorkBuddy。来源列表是开放的：新增一个 Agent 只需要一个解析模块，看板、数据库、搜索与 API 都保持不变。
+
+## 为什么需要 Agent Session Hub
+
+### 1. 给只存在于 CLI 里的会话历史一个真正的界面
+
+编码 Agent 是终端优先的：会话以 JSONL 藏在隐藏目录里，产生它的终端早已关闭。Session Hub 给这段历史一个正经的查看方式——消息、思考、工具调用与工具结果都在浏览器里渲染，支持全文搜索、按项目分组、筛选、一键复制、会话中提到的本地文件只读查看，以及稳定的内部 session id。不用往 Agent 里安装任何东西，它们本来写下的文件就够。
+
+### 2. 多个 Agent 的会话放在一起看
+
+同时用的 Agent 越多，工作就越分散在 Claude Code、Codex、dsh、WorkBuddy 以及以后出现的工具里。两天前在某个 Agent 里开的任务，很容易再也找不到。Session Hub 把各个来源聚合进同一个列表：按项目分组、按最近更新排序，「这个活当时是在哪个 Agent 里做的」一次搜索就能回答，而不是逐个翻各个 Agent 的目录。Agent、项目、时间和内容都可筛选，本地 SQLite 副本让跨 Agent 搜索也很快。
+
+### 3. 多 Agent 共享上下文与任务调度的底座
+
+单个 Agent 通常看不到其它 Agent 做过什么。一旦所有会话都被解析成同一种结构——带稳定 id、项目、Agent 和完整消息历史——Agent 之间共享上下文、在它们之间调度任务才真正可行：一个 Agent 可以查到另一个 Agent 已经试过什么，而不需要你手工搬运记录；调度器也能据此挑选更合适的 Agent 接手下一步。Session Hub 已经把底座做好（结构化的本地副本、稳定的 session id、只读 JSON API）；这些跨 Agent 的工作流是项目的方向，还不是现成功能。
 
 ## 支持的 Agent
+
+每个来源都按 Agent 自己写的位置读取，不需要额外配置。
 
 | Agent | 会话位置 | 解析内容 |
 | --- | --- | --- |
@@ -24,7 +37,7 @@
 
 ## 可选的飞书 bridge 支持（额外）
 
-这四个 Agent 都不依赖 bridge。但如果你恰好是通过 bridge 在飞书里和它们对话，Session Hub 会额外把会话和对应的飞书 chat 关联起来：
+这些 Agent 都不依赖 bridge。但如果你恰好是通过 bridge 在飞书里和它们对话，Session Hub 会额外把会话和对应的飞书 chat 关联起来：
 
 - [lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)（claude 与 codex profile）
 - [dsh-lark-channel](https://github.com/JunguangJiang/dsh-lark-channel)
@@ -89,7 +102,7 @@ npm start -- --rebuild
 - 侧边栏同时展示「项目」与「最近」两个可折叠区块：项目按工作目录分组（组间与组内均按最近更新倒序），最近为全部会话倒序；每个会话只显示标题、Agent 与时间
 - 项目默认全部收起；「项目」「最近」区块与每个项目的展开/收起状态保存在浏览器 localStorage，刷新页面或下次打开时保持
 - 默认隐藏 0 条消息的空会话，以及 cwd 位于 `/tmp`、`/private/tmp`（含子目录）的临时会话；API 加 `includeHidden=1` 可查看
-- 侧边栏底部「设置」页：可分别开关空会话与临时目录会话、启用/停用四个 Agent、切换界面语言、查看本地数据库与各来源目录；停用 Agent 后会停止同步并移除其本地副本，重新启用会再次读取源文件
+- 侧边栏底部「设置」页：可分别开关空会话与临时目录会话、启用/停用各个 Agent、切换界面语言、查看本地数据库与各来源目录；停用 Agent 后会停止同步并移除其本地副本，重新启用会再次读取源文件
 - 设置旁的「状态」页按 Agent 汇总会话数、消息数、最近同步时间，并展示最近一条会话的内部 ID 与最新消息的单行摘要；点击即可打开该会话
 - 每个会话都有稳定的内部 **session id**（由会话 key 派生的 8 位十六进制串，`--rebuild` 后不变），详情页头部会展示
 - 后台同步只为发生变化的会话各打一行日志：`+ [agent] <session-id> <摘要>`，会话从来源消失时打一行删除记录；没有变化时不输出，整体情况看「状态」页
@@ -146,5 +159,5 @@ public/              前端看板
   images.js          会话图片路径解析为图片接口地址
   app.js             会话列表、详情、设置、状态
   viewer.html/.js    只读文件查看器（带行号）
-  icons/             四个 Agent 的图标
+  icons/             Agent 图标
 ```
