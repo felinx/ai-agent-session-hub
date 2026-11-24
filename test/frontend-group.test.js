@@ -27,6 +27,23 @@ test('无 cwd 的会话归入末尾分组', () => {
   assert.deepEqual(groups[1].sessions.map(x => x.key), ['none']);
 });
 
+test('WorkBuddy 日期时间目录归入 workbuddy-default，但保留会话原始 cwd', () => {
+  const groups = groupSessionsByProject([
+    { key: 'wb1', agent: 'workbuddy', cwd: '/Users/felinx/WorkBuddy/2026-10-02-11-25-23', updatedAt: 200 },
+    { key: 'wb2', agent: 'workbuddy', cwd: '/Users/felinx/WorkBuddy/2026-10-11-07-20-59', updatedAt: 100 },
+    { key: 'wb3', agent: 'workbuddy', cwd: '/Users/felinx/WorkBuddy/misc', updatedAt: 300 },
+    { key: 'claude1', agent: 'claude', cwd: '/Users/felinx/project/2026-10-02-11-25-23', updatedAt: 400 }
+  ]);
+
+  const fallback = groups.find(group => group.cwd === 'workbuddy-default');
+  assert.ok(fallback);
+  assert.deepEqual(fallback.sessions.map(session => session.key), ['wb1', 'wb2']);
+  assert.equal(fallback.sessions[0].cwd, '/Users/felinx/WorkBuddy/2026-10-02-11-25-23');
+
+  assert.ok(groups.some(group => group.cwd === '/Users/felinx/WorkBuddy/misc'));
+  assert.ok(groups.some(group => group.cwd === '/Users/felinx/project/2026-10-02-11-25-23'));
+});
+
 test('空数组返回空数组，且不修改输入顺序', () => {
   assert.deepEqual(groupSessionsByProject([]), []);
   const input = [s('a1', '/p1', 100), s('a2', '/p1', 200)];

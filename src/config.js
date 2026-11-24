@@ -15,6 +15,7 @@ export function loadConfig(env = process.env, argv = process.argv.slice(2)) {
       claude: env.CLAUDE_HOME || path.join(home, '.claude'),
       codex: env.CODEX_HOME || path.join(home, '.codex'),
       dsh: env.DSH_HOME || path.join(home, '.dsh'),
+      workbuddy: env.WORKBUDDY_HOME || path.join(home, '.workbuddy'),
       larkChannel: env.LARK_CHANNEL_HOME || path.join(home, '.lark-channel')
     }
   };

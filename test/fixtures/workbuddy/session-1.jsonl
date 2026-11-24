@@ -1,0 +1,13 @@
+{"type":"session-meta","id":"m0","sessionId":"44444444-4444-4444-8444-444444444444","timestamp":1795000000000,"meta":{}}
+{"type":"message","id":"m1","timestamp":1795000001000,"role":"user","content":[{"type":"input_text","text":"<system-reminder data-role=\"user-context\">\n<user_info>Workspace Folder: /tmp/workbuddy</user_info>\n</system-reminder>\n<user_query>帮我梳理项目结构</user_query>"}],"providerData":{},"cwd":"/tmp/workbuddy"}
+{"type":"message","id":"m2","timestamp":1795000001100,"role":"user","content":[{"type":"input_text","text":"内部注入"}],"providerData":{"isMeta":true},"cwd":"/tmp/workbuddy"}
+{"type":"message","id":"m3","timestamp":1795000002000,"role":"assistant","content":[{"type":"output_text","text":"我先看看。"}],"providerData":{"messageId":"a1"},"cwd":"/tmp/workbuddy"}
+{"type":"reasoning","id":"m4","timestamp":1795000001900,"providerData":{"messageId":"a1"},"rawContent":[{"type":"reasoning_text","text":"先读目录"}],"content":[],"cwd":"/tmp/workbuddy"}
+{"type":"function_call","id":"m5","timestamp":1795000002100,"providerData":{"messageId":"a1"},"callId":"call-1","name":"Bash","arguments":"{\"command\":\"ls\"}","cwd":"/tmp/workbuddy"}
+{"type":"function_call_result","id":"m6","timestamp":1795000002200,"providerData":{"messageId":"a1"},"callId":"call-1","name":"Bash","status":"completed","output":{"type":"text","text":"a.txt"},"cwd":"/tmp/workbuddy"}
+{"type":"function_call","id":"m7","timestamp":1795000003100,"providerData":{"messageId":"a2"},"callId":"call-2","name":"Read","arguments":"{\"path\":\"a.txt\"}","cwd":"/tmp/workbuddy"}
+{"type":"function_call_result","id":"m8","timestamp":1795000003200,"providerData":{"messageId":"a2"},"callId":"call-2","name":"Read","status":"incomplete","output":{"type":"text","text":"boom"},"cwd":"/tmp/workbuddy"}
+{"type":"message","id":"m9","timestamp":1795000003000,"role":"assistant","content":[{"type":"output_text","text":"结果如下"}],"providerData":{"messageId":"a2"},"cwd":"/tmp/workbuddy"}
+{"type":"message","id":"m10","timestamp":1795000003300,"role":"user","content":[{"type":"input_text","text":"压缩内部"}],"providerData":{"isCompactInternal":true,"isCompacted":true,"skipRun":true},"cwd":"/tmp/workbuddy"}
+{"type":"file-history-snapshot","id":"m11","timestamp":1795000003400,"messageId":"m1","snapshot":{},"cwd":"/tmp/workbuddy"}
+{"type":"ai-title","id":"m12","timestamp":1795000004000,"aiTitle":"项目结构梳理","sessionId":"44444444-4444-4444-8444-444444444444","cwd":"/tmp/workbuddy"}
