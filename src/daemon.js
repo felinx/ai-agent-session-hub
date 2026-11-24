@@ -71,9 +71,12 @@ export async function startDaemon({
   const running = liveDaemon(config.pidPath);
   if (running) return { alreadyRunning: true, info: running };
 
+  const args = [entry, 'run', '--host', config.host, '--port', String(config.port), '--db', config.dbPath];
+  if (config.rebuild) args.push('--rebuild');
+
   const child = spawnImpl(
     process.execPath,
-    [entry, 'run', '--host', config.host, '--port', String(config.port), '--db', config.dbPath],
+    args,
     { detached: true, stdio: 'ignore', env: { ...env, SESSION_HUB_DAEMON: '1' } }
   );
   child.unref();
