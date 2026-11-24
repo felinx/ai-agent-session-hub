@@ -64,6 +64,7 @@ npm start -- --rebuild
 - Full-text search (SQLite FTS5 trigram; automatically falls back to `LIKE` for queries shorter than 3 characters)
 - Session detail: message order, thinking, tool calls, and tool results (collapsible). Messages, thinking, and tool content are rendered as Markdown, with automatic JSON indentation/formatting
 - Markdown images in session content are shown inline. Relative paths (for example `![shot](shots/a.png)`) are resolved against the session's cwd and served read-only; files that no longer exist render as a deleted-image placeholder
+- Local file paths in session content (for example `[cordis.patch.yml:58-62](/Users/me/app/cordis.patch.yml#L58-L62)`) open in a read-only file viewer with line numbers; a `#L58-L62` fragment highlights and scrolls to that range. Relative paths resolve against the session's cwd
 - One-click copy buttons on every message and on each thinking, tool-call, and tool-result block (copies the original text, not the rendered HTML)
 - Auxiliary sessions are excluded: Codex `onboarding_checklist` sessions do not appear in the session list
 - WorkBuddy reasoning, tool calls, tool results, and AI titles are parsed; internal data such as `isMeta`, context compaction, `skipRun`, and aborted records is filtered out
@@ -89,6 +90,7 @@ npm start -- --rebuild
 - All responses use `Cache-Control: no-store`; static file paths are protected against traversal.
 - Assets referenced from `index.html` (CSS, JS, logo, favicons) get a content-hash `?v=` query, so changing a file also busts browser and favicon caches.
 - Session images are served only from inside the session's own working directory, and only for known image extensions; `..`, absolute paths outside it, symlinks, and other files are rejected.
+- The file viewer reads only local files you click: text is capped at 1 MB, binary content is reported but not displayed, and there is no write or upload path. Because the service is local-only and unauthenticated, any local file readable by your user can be opened through `/api/file` — keep the port on `127.0.0.1`.
 - The local copy database directory uses mode `0700`; the database and its WAL/SHM files use `0600`.
 
 ## Tests
