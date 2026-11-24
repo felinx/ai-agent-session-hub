@@ -282,17 +282,20 @@ body {
   white-space: nowrap;
 }
 
-.dot {
-  width: 9px;
-  height: 9px;
+.agent-icon {
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--muted);
+  object-fit: cover;
   flex: none;
+  display: block;
 }
 
-.dot.claude { background: var(--claude); }
-.dot.codex { background: var(--codex); }
-.dot.dsh { background: var(--dsh); }
+.agent-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 
 .badge {
   display: inline-block;

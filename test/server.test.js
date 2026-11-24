@@ -29,7 +29,7 @@ function seed(db) {
   ], { mtimeMs: 200, size: 1 });
 }
 
-async function makeServer(extraSeed) {
+async function makeServer(extraSeed, extraFiles = {}) {
   const db = openDb(':memory:');
   initSchema(db);
   seed(db);
@@ -37,6 +37,9 @@ async function makeServer(extraSeed) {
 
   const publicDir = mkdtempSync(path.join(tmpdir(), 'session-hub-public-'));
   writeFileSync(path.join(publicDir, 'index.html'), '<!doctype html><div id="app"></div>');
+  for (const [name, content] of Object.entries(extraFiles)) {
+    writeFileSync(path.join(publicDir, name), content);
+  }
 
   const state = { scanning: false, lastSyncAt: null, warnings: [] };
   const server = createServer({ db, state, publicDir });
@@ -161,4 +164,14 @@ test('静态文件与路径穿越防护', async (t) => {
 
   assert.equal((await fetch(s.base + '/../package.json')).status, 404);
   assert.equal((await fetch(s.base + '/' + encodeURIComponent('../package.json'))).status, 404);
+});
+
+test('静态 PNG 以 image/png 返回', async (t) => {
+  const magic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const s = await makeServer(undefined, { 'logo.png': magic });
+  t.after(() => s.close());
+
+  const res = await fetch(s.base + '/logo.png');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /image\/png/);
 });

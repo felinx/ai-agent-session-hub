@@ -98,4 +98,5 @@ src/
     dsh.js           dsh zstd 会话发现与解析
     larkMap.js       飞书 chat 映射
 public/              前端看板
+  icons/             三个 Agent 的图标
 ```

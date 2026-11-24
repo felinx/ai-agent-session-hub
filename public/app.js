@@ -45,8 +45,15 @@ function el(tag, props = {}, children = []) {
   return node;
 }
 
-function relativeTime(ms) {
-  if (!ms) return '未知时间';
+function agentIcon(agent, alt = '') {
+  return el('img', {
+    class: 'agent-icon',
+    src: `/icons/${agent}.png`,
+    alt
+  });
+}
+
+function relativeTime(ms) {  if (!ms) return '未知时间';
   const diff = Date.now() - ms;
   if (diff < 60_000) return '刚刚';
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
@@ -96,7 +103,7 @@ function renderChips() {
         loadSessions();
       }
     }, [
-      entry.agent === 'all' ? null : el('span', { class: `dot ${entry.agent}` }),
+      entry.agent === 'all' ? null : agentIcon(entry.agent),
       `${entry.agent === 'all' ? '全部' : entry.agent} ${entry.count}`
     ]));
   }
@@ -145,7 +152,7 @@ function sessionItem(session) {
     }
   }, [
     el('div', { class: 'session-title-row' }, [
-      el('span', { class: `dot ${session.agent}` }),
+      agentIcon(session.agent, session.agent),
       el('span', { class: 'session-title', text: session.title }),
       el('span', { class: 'session-time', text: relativeTime(session.updatedAt) })
     ])
@@ -314,7 +321,10 @@ function renderDetail(detail) {
     el('header', { class: 'detail-head' }, [
       el('h2', { text: session.title }),
       el('div', { class: 'detail-meta' }, [
-        el('span', { class: `badge ${session.agent}`, text: session.agent }),
+        el('span', { class: 'agent-label' }, [
+          agentIcon(session.agent),
+          el('span', { text: session.agent })
+        ]),
         el('span', { text: session.chatId ? `chat ${session.chatId}` : '本地会话' }),
         el('span', { text: `更新于 ${formatTime(session.updatedAt)}` }),
         el('span', { text: `${session.messageCount} 条消息` }),
