@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { readDaemon, isAlive } from '../src/daemon.js';
+import { readDaemon, isAlive, liveDaemon, stopDaemon, removeDaemonFile } from '../src/daemon.js';
 
 const bin = path.join(import.meta.dirname, '..', 'bin', 'session-hub.js');
 
@@ -101,4 +101,35 @@ test('stop reports a hub that is not running', () => {
   const stopped = spawnSync(process.execPath, [bin, 'stop'], { env, encoding: 'utf8' });
   assert.equal(stopped.status, 0);
   assert.match(`${stopped.stdout}${stopped.stderr}`, /not running/i);
+});
+
+test('liveDaemon treats a recycled pid as stale', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-daemon-'));
+  const pidPath = path.join(dir, 'hub.pid');
+
+  writeFileSync(pidPath, JSON.stringify({ pid: process.pid, port: 7317, startedAt: 1 }));
+  assert.equal(liveDaemon(pidPath, { commandOf: () => 'node /usr/bin/unrelated' }), null);
+  assert.equal(existsSync(pidPath), false);
+
+  writeFileSync(pidPath, JSON.stringify({ pid: process.pid, port: 7317, startedAt: 1 }));
+  assert.equal(liveDaemon(pidPath, { commandOf: () => 'node /repo/bin/session-hub.js run' }).pid, process.pid);
+  removeDaemonFile(pidPath);
+});
+
+test('stopDaemon never signals a process that is not the hub', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-daemon-'));
+  const pidPath = path.join(dir, 'hub.pid');
+  writeFileSync(pidPath, JSON.stringify({ pid: process.pid, port: 7317, startedAt: 1 }));
+
+  let killed = false;
+  const result = await stopDaemon({
+    pidPath,
+    commandOf: () => 'node /usr/bin/unrelated',
+    kill: () => { killed = true; }
+  });
+
+  assert.equal(result.stopped, false);
+  assert.equal(result.stale, true);
+  assert.equal(killed, false);
+  assert.equal(existsSync(pidPath), false);
 });

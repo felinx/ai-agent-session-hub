@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,12 +50,28 @@ export function removeDaemonFile(pidPath, pid) {
   try { unlinkSync(pidPath); } catch {}
 }
 
-export function liveDaemon(pidPath) {
+// A pid can be reused after the daemon dies, so the pid file alone is not proof of
+// identity. `ps` gives the command line of the process that holds the pid.
+export function processCommand(pid) {
+  try {
+    return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function looksLikeHub(command) {
+  return command === '' || command.includes('session-hub');
+}
+
+export function liveDaemon(pidPath, { commandOf = processCommand } = {}) {
   const info = readDaemon(pidPath);
   if (!info) return null;
-  if (isAlive(info.pid)) return info;
-  removeDaemonFile(pidPath, info.pid);
-  return null;
+  if (!isAlive(info.pid) || !looksLikeHub(commandOf(info.pid))) {
+    removeDaemonFile(pidPath, info.pid);
+    return null;
+  }
+  return info;
 }
 
 // Detach a `session-hub run` child and wait until it has written its pid file, which
@@ -107,12 +123,13 @@ export async function stopDaemon({
   pidPath,
   timeoutMs = 8000,
   kill = process.kill,
+  commandOf = processCommand,
   sleep = defaultSleep
 }) {
   const info = readDaemon(pidPath);
   if (!info) return { stopped: false };
 
-  if (!isAlive(info.pid)) {
+  if (!isAlive(info.pid) || !looksLikeHub(commandOf(info.pid))) {
     removeDaemonFile(pidPath, info.pid);
     return { stopped: false, stale: true, info };
   }
@@ -120,7 +137,7 @@ export async function stopDaemon({
   try {
     kill(info.pid, 'SIGTERM');
   } catch (error) {
-    if (error?.code === 'ESRCH') {
+    if (error?.code === 'ESRCH' || error?.code === 'EPERM') {
       removeDaemonFile(pidPath, info.pid);
       return { stopped: false, stale: true, info };
     }
