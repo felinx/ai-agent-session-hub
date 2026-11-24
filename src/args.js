@@ -15,7 +15,11 @@ const SPECS = {
   start: SERVER_FLAGS,
   restart: SERVER_FLAGS,
   stop: {},
-  status: { '--json': { key: 'json', value: 'flag' } },
+  status: {
+    '--json': { key: 'json', value: 'flag' },
+    '--port': SERVER_FLAGS['--port'],
+    '--db': SERVER_FLAGS['--db']
+  },
   logs: {
     '-f': { key: 'follow', value: 'flag' },
     '--follow': { key: 'follow', value: 'flag' },

@@ -3,6 +3,7 @@ import { parseArgs } from './args.js';
 import { loadConfig } from './config.js';
 import { startHub, defaultPublicDir } from './hub.js';
 import { createLogStore } from './log-file.js';
+import { collectStatus, formatStatus } from './status.js';
 import { stamp } from './log.js';
 import { resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
 
@@ -87,6 +88,17 @@ async function runCommand(options, io) {
   return 0;
 }
 
+async function statusCommand(options, io) {
+  const config = loadConfig(io.env, options);
+  const collect = io.collectStatus ?? collectStatus;
+  const status = await collect({ config });
+
+  if (options.json) io.out(JSON.stringify(status, null, 2));
+  else io.out(formatStatus(status));
+
+  return status.running ? 0 : 1;
+}
+
 export async function main(argv = process.argv.slice(2), io = {}) {
   const env = io.env ?? process.env;
   const out = io.out ?? ((line) => console.log(line));
@@ -110,6 +122,8 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       return 0;
     case 'run':
       return runCommand(options, context);
+    case 'status':
+      return statusCommand(options, context);
     default:
       err(`session-hub: command "${command}" is not implemented yet`);
       return 1;

@@ -28,6 +28,12 @@ test('accepts --name=value form', () => {
 test('parses status flags', () => {
   const result = parseArgs(['status', '--json']);
   assert.deepEqual(result, { command: 'status', options: { json: true }, errors: [] });
+
+  assert.deepEqual(parseArgs(['status', '--json', '--port', '8080', '--db', '/tmp/x.db']), {
+    command: 'status',
+    options: { json: true, port: 8080, db: '/tmp/x.db' },
+    errors: []
+  });
 });
 
 test('parses log flags', () => {
