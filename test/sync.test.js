@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { zstdCompressSync } from 'node:zlib';
-import { openDb, initSchema, listSessions } from '../src/db.js';
+import { openDb, initSchema, listSessions, eventsSince, getLastEventSeq } from '../src/db.js';
 import { saveSettings } from '../src/settings.js';
 import { syncOnce } from '../src/sync.js';
 import { sessionId } from '../src/session-id.js';
@@ -66,6 +66,13 @@ function setup() {
 function bumpMtime(file) {
   const next = new Date(Date.now() + 10_000);
   utimesSync(file, next, next);
+}
+
+function writeDsh(file, lines) {
+  writeFileSync(
+    file,
+    zstdCompressSync(Buffer.from(lines.map(line => JSON.stringify(line)).join('\n')))
+  );
 }
 
 test('first sync writes sessions from all four sources', async () => {
@@ -244,4 +251,118 @@ test('chatId is null when the catalog is missing', async () => {
   const { db, config } = setup();
   await syncOnce(db, config);
   assert.ok(listSessions(db, {}).every(s => s.chatId === null));
+});
+
+test('sync appends created events and one sync.completed per pass', async () => {
+  const { db, config } = setup();
+  const r = await syncOnce(db, config);
+  const events = eventsSince(db, { since: 0 }).events;
+  assert.deepEqual(events.map(event => event.type), [
+    'session.created', 'session.created', 'session.created', 'session.created', 'sync.completed'
+  ]);
+  assert.deepEqual(events.at(-1).added, 4);
+  assert.deepEqual(events.at(-1).updated, 0);
+  assert.deepEqual(events.at(-1).removed, 0);
+  assert.equal(r.added, 4);
+  db.close();
+});
+
+test('change records carry the key, project, updatedAt, and lastMessageSeq', async () => {
+  const { db, config } = setup();
+  const r = await syncOnce(db, config);
+  const claude = r.changes.find(change => change.agent === 'claude');
+  assert.equal(claude.key, `claude:${CLAUDE_ID}`);
+  assert.equal(claude.project, 'proj');
+  assert.equal(claude.lastMessageSeq, 1);
+  assert.ok(claude.updatedAt > 0);
+  db.close();
+});
+
+test('an appended completed turn emits session.updated, turn.completed, then sync.completed', async () => {
+  const { db, config, files } = setup();
+  await syncOnce(db, config);
+  const head = getLastEventSeq(db);
+
+  writeDsh(files.dshFile, [
+    ...DSH_LINES,
+    { type: 'turn/start', time: 1795000003000, data: { turn: 2 } },
+    {
+      type: 'user/message', seq: 3, time: 1795000003000,
+      data: { id: 'u2', role: 'user', content: [{ type: 'text', text: '第二问' }] }
+    },
+    {
+      type: 'assistant/message', seq: 4, time: 1795000004000,
+      data: { message: { role: 'assistant', content: [{ type: 'text', text: '第二答' }] } }
+    },
+    { type: 'turn/end', time: 1795000005000, data: { turn: 2, reason: { kind: 'completed' } } }
+  ]);
+  bumpMtime(files.dshFile);
+
+  await syncOnce(db, config);
+  const events = eventsSince(db, { since: head }).events;
+  assert.deepEqual(events.map(event => event.type), [
+    'session.updated', 'turn.completed', 'sync.completed'
+  ]);
+  assert.equal(events[1].turn.prompt.text, '第二问');
+  assert.equal(events[1].turn.final.text, '第二答');
+  assert.equal(events[1].turn.status, 'completed');
+  db.close();
+});
+
+test('a prompt with no answer after settling is emitted as an interrupted turn', async () => {
+  const { db, config, files } = setup();
+  await syncOnce(db, config);
+  const head = getLastEventSeq(db);
+
+  writeDsh(files.dshFile, [
+    ...DSH_LINES,
+    { type: 'turn/start', time: 1795000006000, data: { turn: 3 } },
+    {
+      type: 'user/message', seq: 5, time: 1795000006000,
+      data: { id: 'u3', role: 'user', content: [{ type: 'text', text: '没有回答就断了' }] }
+    }
+  ]);
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(files.dshFile, old, old);
+
+  await syncOnce(db, config);
+  const turn = eventsSince(db, { since: head, types: ['turn.completed'] }).events[0];
+  assert.equal(turn.turn.status, 'interrupted');
+  assert.equal(turn.turn.prompt.text, '没有回答就断了');
+  assert.equal(turn.turn.final, null);
+  db.close();
+});
+
+test('deleting a source file appends session.removed before sync.completed', async () => {
+  const { db, config, files } = setup();
+  await syncOnce(db, config);
+  const head = getLastEventSeq(db);
+
+  unlinkSync(files.codexFile);
+  await syncOnce(db, config);
+  const events = eventsSince(db, { since: head }).events;
+  assert.deepEqual(events.map(event => event.type), ['session.removed', 'sync.completed']);
+  assert.equal(events[0].session.agent, 'codex');
+  assert.equal(events[1].removed, 1);
+  db.close();
+});
+
+test('a settle re-parse adds no duplicate session or turn events', async () => {
+  const { db, config, files } = setup();
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(files.claudeFile, old, old);
+
+  await syncOnce(db, config);
+  const head = getLastEventSeq(db);
+
+  // Pretend the last parse happened before the settle point: the next pass re-parses
+  // the unchanged file once to allow inferred turn completions.
+  db.prepare('UPDATE sync_state SET last_synced_at = 0 WHERE source_path = ?')
+    .run(files.claudeFile);
+
+  const r = await syncOnce(db, config);
+  assert.equal(r.unchanged, 4);
+  const events = eventsSince(db, { since: head }).events;
+  assert.deepEqual(events.map(event => event.type), ['sync.completed']);
+  db.close();
 });

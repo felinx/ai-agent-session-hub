@@ -165,7 +165,7 @@ function insertTurns(db, session, messages, turns, priorTurns, now) {
         type: 'turn.completed',
         sessionKey: session.key,
         agent: session.agent,
-        at: fields.endedAt ?? now,
+        at: now,
         payload: { turn: turnObject }
       });
     }
@@ -262,6 +262,13 @@ export function getSyncState(db, sourcePath) {
     'SELECT mtime_ms AS mtimeMs, size FROM sync_state WHERE source_path = ?'
   ).get(sourcePath);
   return row ? { mtimeMs: row.mtimeMs, size: row.size } : null;
+}
+
+export function getSyncMeta(db, sourcePath) {
+  return db.prepare(`
+    SELECT mtime_ms AS mtimeMs, size, last_synced_at AS lastSyncedAt
+    FROM sync_state WHERE source_path = ?
+  `).get(sourcePath) ?? null;
 }
 
 export function hasSession(db, key) {

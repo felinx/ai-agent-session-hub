@@ -1,10 +1,14 @@
 import { stat } from 'node:fs/promises';
+import path from 'node:path';
 import { discoverClaude, parseClaude } from './sources/claude.js';
 import { discoverCodex, parseCodex } from './sources/codex.js';
 import { discoverDsh, parseDsh } from './sources/dsh.js';
 import { discoverWorkbuddy, parseWorkbuddy } from './sources/workbuddy.js';
 import { buildChatMap } from './sources/larkMap.js';
-import { getSyncState, hasSession, replaceSession, pruneMissing } from './db.js';
+import {
+  getSyncMeta, hasSession, replaceSession, pruneMissing, appendEvent, pruneEvents
+} from './db.js';
+import { SETTLE_MS } from './turns.js';
 import { getSettings } from './settings.js';
 import { sessionId } from './session-id.js';
 import { oneLine } from './normalize.js';
@@ -88,8 +92,15 @@ export async function syncOnce(db, config, opts = {}) {
         (file.titleHint !== undefined && file.titleHint !== existing.title) ||
         desiredChatId !== existing.chatId;
 
-      const state = getSyncState(db, file.sourcePath);
-      if (!force && !metadataStale && state && state.mtimeMs === file.mtimeMs && state.size === file.size) {
+      const state = getSyncMeta(db, file.sourcePath);
+      const contentChanged = !state ||
+        state.mtimeMs !== file.mtimeMs || state.size !== file.size || metadataStale;
+      // An unchanged file is re-parsed once after it settles, so inferred turn endings
+      // (WorkBuddy, EOF interruptions) can be emitted without a source file change.
+      const settledAt = file.mtimeMs + SETTLE_MS;
+      const settleDue = !contentChanged && !!state &&
+        Date.now() >= settledAt && (state.lastSyncedAt ?? 0) < settledAt;
+      if (!force && !contentChanged && !settleDue) {
         unchanged += 1;
         continue;
       }
@@ -123,30 +134,55 @@ export async function syncOnce(db, config, opts = {}) {
       };
 
       const isUpdate = hasSession(db, key);
-      if (isUpdate) updated += 1;
-      else added += 1;
-      changes.push({
-        kind: isUpdate ? 'updated' : 'added',
-        agent: file.agent,
-        id: sessionId(key),
-        summary: latestSummary(parsed.messages)
-      });
+      const emitsSession = contentChanged || force;
+      if (isUpdate) {
+        if (emitsSession) updated += 1;
+        else unchanged += 1;
+      } else {
+        added += 1;
+      }
+      if (emitsSession) {
+        changes.push({
+          kind: isUpdate ? 'updated' : 'added',
+          agent: file.agent,
+          id: sessionId(key),
+          key,
+          project: session.cwd ? path.basename(session.cwd) : null,
+          updatedAt: session.updatedAt,
+          lastMessageSeq: parsed.messages.length ? parsed.messages.length - 1 : null,
+          summary: latestSummary(parsed.messages)
+        });
+      }
 
       replaceSession(db, session, parsed.messages, {
         mtimeMs: file.mtimeMs,
         size: file.size
+      }, {
+        kind: emitsSession ? (isUpdate ? 'updated' : 'created') : null,
+        turns: parsed.turns ?? []
       });
     }
   }
 
   let removed = 0;
   if (results.every(result => result.ok)) {
-    const removedSessions = pruneMissing(db, new Set(discovered.map(file => file.sourcePath)));
+    const removedSessions = pruneMissing(
+      db, new Set(discovered.map(file => file.sourcePath)), { events: true }
+    );
     removed = removedSessions.length;
     for (const session of removedSessions) {
-      changes.push({ kind: 'removed', agent: session.agent, id: sessionId(session.key) });
+      changes.push({
+        kind: 'removed', agent: session.agent, id: sessionId(session.key), key: session.key
+      });
     }
   }
+
+  appendEvent(db, {
+    type: 'sync.completed',
+    at: Date.now(),
+    payload: { added, updated, removed }
+  });
+  pruneEvents(db);
 
   const byAgent = db.prepare(
     'SELECT agent, count(*) AS count FROM sessions GROUP BY agent ORDER BY agent'
