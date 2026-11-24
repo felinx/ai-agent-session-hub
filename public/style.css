@@ -644,8 +644,23 @@ details[open] > summary.detail-toggle .chevron {
   color: #727981;
 }
 
+/* 复制按钮不能放进 <summary>（交互元素嵌在 summary 里不可访问），改为绝对定位到标题行右侧。 */
+.detail-block {
+  position: relative;
+}
+
+.detail-block > .detail-toggle {
+  padding-right: 34px;
+}
+
+.detail-copy {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+}
+
 /* 未展开时不显示复制按钮，避免大量无内容可复制的按钮。 */
-details:not([open]) > summary.detail-toggle .copy-btn {
+.detail-block:not([open]) > .detail-copy {
   display: none;
 }
 

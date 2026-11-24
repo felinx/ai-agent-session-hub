@@ -300,6 +300,7 @@ function renderChips() {
 function selectEl(name, options, value, ariaLabel = name) {
   const select = el('select', {
     class: 'filter-select',
+    name,
     'aria-label': ariaLabel,
     onchange: (event) => {
       state[name] = event.target.value;
@@ -481,12 +482,14 @@ async function loadSessions() {
 }
 
 function detailsBlock(summary, bodyNode, copyText) {
-  return el('details', {}, [
+  // 复制按钮不能放进 <summary>：交互元素嵌在 summary 里可访问性不一致（Chrome 会报 Issue），
+  // 因此作为 details 的兄弟节点绝对定位到标题行右侧。
+  return el('details', { class: 'detail-block' }, [
     el('summary', { class: 'detail-toggle' }, [
       el('span', { class: 'chevron', html: CHEVRON_ICON }),
-      el('span', { class: 'detail-toggle-label', text: summary }),
-      copyButton(copyText)
+      el('span', { class: 'detail-toggle-label', text: summary })
     ]),
+    el('span', { class: 'detail-copy' }, [copyButton(copyText)]),
     bodyNode
   ]);
 }
@@ -682,10 +685,11 @@ const ROOT_LABELS = {
 
 let settingsStatusTimer;
 
-function switchControl(checked, onchange, { disabled = false, label = '' } = {}) {
+function switchControl(checked, onchange, { disabled = false, label = '', name = '' } = {}) {
   return el('input', {
     class: 'switch',
     type: 'checkbox',
+    name: name || undefined,
     role: 'switch',
     checked: checked ? '' : undefined,
     disabled: disabled ? '' : undefined,
@@ -752,6 +756,7 @@ function toggleAgent(id, enabled) {
 function languageRow(settings, disabled) {
   const select = el('select', {
     class: 'filter-select language-select',
+    name: 'language',
     'aria-label': tr('settings.language'),
     disabled: disabled ? '' : undefined,
     onchange: (event) => updateSettings({ language: event.target.value })
@@ -790,7 +795,8 @@ function renderSettings() {
         : enabled ? tr('settings.agentEnabled') : tr('settings.agentDisabled'),
       switchControl(enabled, (event) => toggleAgent(agent.id, event.target.checked), {
         disabled: saving || lastEnabled,
-        label: tr('settings.enableAgent', { name: agent.name })
+        label: tr('settings.enableAgent', { name: agent.name }),
+        name: `agent-${agent.id}`
       }),
       agentIcon(agent.id)
     );
@@ -823,7 +829,8 @@ function renderSettings() {
           switchControl(settings.showEmptySessions, (event) =>
             updateSettings({ showEmptySessions: event.target.checked }), {
             disabled: saving,
-            label: tr('settings.showEmpty')
+            label: tr('settings.showEmpty'),
+            name: 'showEmptySessions'
           })
         ),
         settingRow(
@@ -832,7 +839,8 @@ function renderSettings() {
           switchControl(settings.showTempSessions, (event) =>
             updateSettings({ showTempSessions: event.target.checked }), {
             disabled: saving,
-            label: tr('settings.showTemp')
+            label: tr('settings.showTemp'),
+            name: 'showTempSessions'
           })
         )
       ]),
