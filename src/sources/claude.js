@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   textFromContent, stripBridgeContext, isSyntheticUserText, deriveTitle, toEpochMs
 } from '../normalize.js';
+import { isSettled } from '../turns.js';
 
 const SESSION_FILE_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
@@ -76,11 +77,39 @@ export async function parseClaude(sourcePath, discovery) {
   const raw = await readFile(sourcePath, 'utf8');
   const messages = [];
   const callOwner = new Map();
+  const turns = [];
+  const unresolvedCalls = new Set();
 
   let sessionId;
   let cwd = null;
   let createdAt = null;
   let firstUserText = '';
+  let openTurn = null;
+  let group = null;
+
+  const TERMINAL_STOP = new Set(['end_turn', 'stop_sequence', 'max_tokens']);
+
+  // One assistant message is split across up to eight lines sharing message.id. The
+  // terminal stop_reason appears on those lines, not only the last, so the group is
+  // closed only when a different message id or a user entry arrives.
+  function closeAssistantGroup() {
+    if (!group) return;
+    const closed = group;
+    group = null;
+    if (!openTurn || !TERMINAL_STOP.has(closed.stopReason)) return;
+    turns.push({
+      turnId: closed.id,
+      status: closed.stopReason === 'max_tokens' ? 'truncated' : 'completed',
+      signal: 'native',
+      startedAt: openTurn.startedAt,
+      endedAt: closed.lastAt ?? openTurn.startedAt,
+      promptIndex: openTurn.promptIndex,
+      finalIndex: closed.lastIndex >= 0 ? closed.lastIndex : null,
+      finalText: closed.texts.length ? closed.texts.join('\n') : undefined
+    });
+    openTurn = null;
+    unresolvedCalls.clear();
+  }
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -100,9 +129,18 @@ export async function parseClaude(sourcePath, discovery) {
 
     if (entry.type !== 'user' && entry.type !== 'assistant') continue;
 
+    const isSidechain = entry.isSidechain === true;
     const content = entry.message?.content;
+    const messageId = entry.type === 'assistant' ? entry.message?.id ?? null : null;
+    const stopReason = entry.type === 'assistant' ? entry.message?.stop_reason ?? null : null;
+    if (!isSidechain && entry.type === 'user') closeAssistantGroup();
+    if (!isSidechain && entry.type === 'assistant' && group && group.id !== messageId) {
+      closeAssistantGroup();
+    }
+
     let text = '';
     let thinking = null;
+    let hasNonToolResult = typeof content === 'string';
     const toolCalls = [];
     const pendingResults = [];
 
@@ -111,6 +149,7 @@ export async function parseClaude(sourcePath, discovery) {
     } else if (Array.isArray(content)) {
       for (const block of content) {
         if (!block || typeof block !== 'object') continue;
+        if (block.type !== 'tool_result') hasNonToolResult = true;
         if (block.type === 'text') {
           text += (text ? '\n' : '') + (block.text ?? '');
         } else if (block.type === 'thinking') {
@@ -144,14 +183,71 @@ export async function parseClaude(sourcePath, discovery) {
         toolResults: []
       });
       for (const call of toolCalls) {
-        if (call.id) callOwner.set(call.id, index);
+        if (call.id) {
+          callOwner.set(call.id, index);
+          if (!isSidechain) unresolvedCalls.add(call.id);
+        }
       }
     }
 
     for (const result of pendingResults) {
+      if (result.callId) unresolvedCalls.delete(result.callId);
       const owner = result.callId ? callOwner.get(result.callId) : undefined;
       if (owner !== undefined) messages[owner].toolResults.push(result);
       else if (index >= 0) messages[index].toolResults.push(result);
+    }
+
+    if (isSidechain) continue;
+
+    const at = toEpochMs(entry.timestamp);
+    if (entry.type === 'user') {
+      const isPrompt = !!cleaned && hasNonToolResult && !isSyntheticUserText(cleaned);
+      // A prompt that arrives while a turn is open is a queued/intermediate message:
+      // whether it starts a new turn depends on what follows it.
+      if (isPrompt && index >= 0 && !openTurn) {
+        openTurn = { promptIndex: index, startedAt: at };
+      }
+      continue;
+    }
+
+    if (messageId) {
+      if (!group) {
+        group = { id: messageId, stopReason: null, texts: [], lastIndex: -1, lastAt: null };
+      }
+      if (stopReason) group.stopReason = stopReason;
+      if (cleaned) group.texts.push(cleaned);
+      if (index >= 0) group.lastIndex = index;
+      if (at !== null) group.lastAt = at;
+    } else if (TERMINAL_STOP.has(stopReason) && openTurn) {
+      turns.push({
+        turnId: null,
+        status: stopReason === 'max_tokens' ? 'truncated' : 'completed',
+        signal: 'native',
+        startedAt: openTurn.startedAt,
+        endedAt: at ?? openTurn.startedAt,
+        promptIndex: openTurn.promptIndex,
+        finalIndex: index >= 0 ? index : null
+      });
+      openTurn = null;
+      unresolvedCalls.clear();
+    }
+  }
+
+  closeAssistantGroup();
+
+  if (openTurn) {
+    const last = messages[messages.length - 1];
+    const settled = isSettled(discovery?.mtimeMs);
+    if (settled && (last?.role === 'user' || unresolvedCalls.size > 0)) {
+      turns.push({
+        turnId: null,
+        status: 'interrupted',
+        signal: 'native',
+        startedAt: openTurn.startedAt,
+        endedAt: last?.at ?? null,
+        promptIndex: openTurn.promptIndex,
+        finalIndex: null
+      });
     }
   }
 
@@ -160,6 +256,7 @@ export async function parseClaude(sourcePath, discovery) {
     title: discovery?.titleHint || deriveTitle(firstUserText),
     cwd,
     createdAt,
-    messages
+    messages,
+    turns
   };
 }

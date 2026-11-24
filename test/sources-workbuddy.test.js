@@ -151,3 +151,141 @@ test('discoverWorkbuddy collects only UUID-named jsonl sessions', async () => {
 
   assert.deepEqual(await discoverWorkbuddy({ roots: { workbuddy: path.join(root, 'missing') } }), []);
 });
+
+function writeBuddy(lines) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-workbuddy-turn-'));
+  const target = path.join(dir, 'turn.jsonl');
+  writeFileSync(target, lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+  return target;
+}
+
+function bUser(text, providerData = {}) {
+  return {
+    type: 'message', role: 'user', timestamp: 1795000001000,
+    content: [{ type: 'input_text', text }], providerData
+  };
+}
+
+function bAssistant(text, { messageId = 'a1', status = 'completed', error, requestId = 'r1' } = {}) {
+  return {
+    type: 'message', role: 'assistant', timestamp: 1795000002000,
+    content: [{ type: 'output_text', text }], status,
+    providerData: { messageId, conversationRequestId: requestId, ...(error ? { error } : {}) }
+  };
+}
+
+function bCall(messageId = 'a1', callId = 'c1') {
+  return {
+    type: 'function_call', timestamp: 1795000002100, callId, name: 'Bash',
+    arguments: '{}', providerData: { messageId }
+  };
+}
+
+function bResult(messageId = 'a1', callId = 'c1') {
+  return {
+    type: 'function_call_result', timestamp: 1795000002200, callId, name: 'Bash',
+    status: 'completed', output: { type: 'text', text: 'ok' }, providerData: { messageId }
+  };
+}
+
+test('a completed assistant text with no same-messageId call closes the turn after settling', async () => {
+  const file = writeBuddy([
+    bUser('<system-reminder>x</system-reminder><user_query>问题</user_query>', { conversationRequestId: 'r1' }),
+    bAssistant('答案')
+  ]);
+  assert.equal((await parseWorkbuddy(file, { mtimeMs: Date.now() })).turns.length, 0);
+
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].turnId, 'r1');
+  assert.equal(p.turns[0].status, 'completed');
+  assert.equal(p.turns[0].signal, 'inferred');
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '问题');
+  assert.equal(p.messages[p.turns[0].finalIndex].text, '答案');
+});
+
+test('text with a same-messageId function call is not terminal', async () => {
+  const file = writeBuddy([
+    bUser('问题', { conversationRequestId: 'r1' }),
+    bAssistant('中间'),
+    bCall('a1'),
+    bResult('a1')
+  ]);
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(p.turns.length, 0);
+});
+
+test('an incomplete assistant message with provider error ends the turn as aborted', async () => {
+  const file = writeBuddy([
+    bUser('问题', { conversationRequestId: 'r1' }),
+    bAssistant('中断', { status: 'incomplete', error: { message: 'Interrupted by user' } })
+  ]);
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].status, 'aborted');
+  assert.equal(p.turns[0].finalIndex, null);
+});
+
+test('a new startsNewUserRequest prompt closes the open turn as interrupted', async () => {
+  const file = writeBuddy([
+    bUser('第一问', { conversationRequestId: 'r1' }),
+    bAssistant('中间', { messageId: 'a1' }),
+    bCall('a1'),
+    bResult('a1'),
+    bUser('第二问', { conversationRequestId: 'r2', startsNewUserRequest: true }),
+    bAssistant('答案', { messageId: 'a2', requestId: 'r2' })
+  ]);
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.deepEqual(p.turns.map(turn => turn.status), ['interrupted', 'completed']);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '第一问');
+  assert.equal(p.messages[p.turns[1].promptIndex].text, '第二问');
+});
+
+test('compaction summaries do not start a turn', async () => {
+  const file = writeBuddy([
+    bUser('问题', { conversationRequestId: 'r1' }),
+    bUser('<cb_summary>\nSummary of the conversation so far: ...', {
+      isCompactInternal: true, isCompacted: true
+    }),
+    bUser('<conversation_history_summary>\nSummary: ...', {
+      isCompactInternal: true, isSummary: true
+    }),
+    bAssistant('答案')
+  ]);
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '问题');
+});
+
+test('a startsNewUserRequest false message stays inside the turn', async () => {
+  const file = writeBuddy([
+    bUser('第一问', { conversationRequestId: 'r1' }),
+    bCall('a1'),
+    bResult('a1'),
+    bUser('补充', { conversationRequestId: 'r1', startsNewUserRequest: false }),
+    bAssistant('答案', { messageId: 'a2', requestId: 'r1' })
+  ]);
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '第一问');
+});
+
+test('EOF with an unresolved function call after settling is interrupted', async () => {
+  const file = writeBuddy([
+    bUser('问题', { conversationRequestId: 'r1' }),
+    bCall('a1')
+  ]);
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].status, 'interrupted');
+});
+
+test('a sync landing between a text and its same-messageId call does not close the turn', async () => {
+  const file = writeBuddy([
+    bUser('问题', { conversationRequestId: 'r1' }),
+    bAssistant('答案')
+  ]);
+  // One second after the append: inside the settle window, so still open.
+  const p = await parseWorkbuddy(file, { mtimeMs: Date.now() - 1000 });
+  assert.equal(p.turns.length, 0);
+});

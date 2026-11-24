@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   textFromContent, stripBridgeContext, isSyntheticUserText, deriveTitle, toEpochMs
 } from '../normalize.js';
+import { isSettled } from '../turns.js';
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -145,12 +146,31 @@ export async function parseCodex(sourcePath, discovery) {
   const raw = await readFile(sourcePath, 'utf8');
   const messages = [];
   const callOwner = new Map();
+  const turns = [];
+  const unresolvedCalls = new Set();
 
   let nativeId = discovery?.nativeId;
   let cwd = null;
   let createdAt = null;
   let firstUserText = '';
   let pendingThinking = null;
+  let openTurn = null;
+
+  function closeOpenTurn(status, endedAt, finalIndex = null) {
+    if (openTurn && openTurn.promptIndex !== null) {
+      turns.push({
+        turnId: openTurn.turnId,
+        status,
+        signal: 'native',
+        startedAt: openTurn.startedAt,
+        endedAt,
+        promptIndex: openTurn.promptIndex,
+        finalIndex
+      });
+    }
+    openTurn = null;
+    unresolvedCalls.clear();
+  }
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -172,8 +192,31 @@ export async function parseCodex(sourcePath, discovery) {
       continue;
     }
 
+    if (entry.type === 'event_msg' && entry.payload) {
+      const payload = entry.payload;
+      const at = toEpochMs(entry.timestamp);
+      if (payload.type === 'task_started') {
+        // A new task beginning proves the previous one never reported completion.
+        closeOpenTurn('interrupted', messages[messages.length - 1]?.at ?? at);
+        openTurn = {
+          turnId: payload.turn_id ?? null,
+          startedAt: at,
+          promptIndex: null
+        };
+      } else if (payload.type === 'task_complete' && openTurn) {
+        const finalIndex = lastAssistantIndex(messages);
+        closeOpenTurn(
+          'completed',
+          at,
+          finalIndex >= openTurn.promptIndex ? finalIndex : null
+        );
+      }
+      continue;
+    }
+
     if (entry.type !== 'response_item' || !entry.payload) continue;
     const payload = entry.payload;
+    const at = toEpochMs(entry.timestamp);
 
     if (payload.type === 'message') {
       if (payload.role !== 'user' && payload.role !== 'assistant') continue;
@@ -183,7 +226,7 @@ export async function parseCodex(sourcePath, discovery) {
 
       const message = {
         role: payload.role,
-        at: null,
+        at,
         text: cleaned,
         thinking: payload.role === 'assistant' ? pendingThinking : null,
         toolCalls: [],
@@ -192,6 +235,11 @@ export async function parseCodex(sourcePath, discovery) {
       if (payload.role === 'assistant') pendingThinking = null;
       if (!message.text && !message.thinking) continue;
       messages.push(message);
+      if (
+        payload.role === 'user' && openTurn && openTurn.promptIndex === null && cleaned
+      ) {
+        openTurn.promptIndex = messages.length - 1;
+      }
       continue;
     }
 
@@ -211,13 +259,16 @@ export async function parseCodex(sourcePath, discovery) {
       }
       let owner = lastAssistantIndex(messages);
       if (owner < 0) {
-        messages.push({ role: 'assistant', at: null, text: '', thinking: pendingThinking, toolCalls: [], toolResults: [] });
+        messages.push({ role: 'assistant', at, text: '', thinking: pendingThinking, toolCalls: [], toolResults: [] });
         pendingThinking = null;
         owner = messages.length - 1;
       }
       const callId = payload.call_id || payload.id || null;
       messages[owner].toolCalls.push({ id: callId, name: payload.name ?? null, input });
-      if (callId) callOwner.set(callId, owner);
+      if (callId) {
+        callOwner.set(callId, owner);
+        unresolvedCalls.add(callId);
+      }
       if (payload.id && payload.id !== callId) callOwner.set(payload.id, owner);
       continue;
     }
@@ -230,11 +281,23 @@ export async function parseCodex(sourcePath, discovery) {
           ? textFromContent(payload.output)
           : JSON.stringify(payload.output ?? '');
       const result = { callId, output, isError: !!payload.is_error };
+      if (callId) unresolvedCalls.delete(callId);
 
       let owner = ownerFor(callId, callOwner);
       if (owner === undefined) owner = lastAssistantIndex(messages);
       if (owner >= 0) messages[owner].toolResults.push(result);
       continue;
+    }
+  }
+
+  if (openTurn) {
+    const last = messages[messages.length - 1];
+    const settled = isSettled(discovery?.mtimeMs);
+    if (
+      settled && openTurn.promptIndex !== null &&
+      (last?.role === 'user' || unresolvedCalls.size > 0)
+    ) {
+      closeOpenTurn('interrupted', last?.at ?? null);
     }
   }
 
@@ -244,6 +307,7 @@ export async function parseCodex(sourcePath, discovery) {
       deriveTitle(firstUserText, ''),
     cwd,
     createdAt,
-    messages
+    messages,
+    turns
   };
 }

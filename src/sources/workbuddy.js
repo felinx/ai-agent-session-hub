@@ -5,6 +5,7 @@ import readline from 'node:readline';
 import {
   textFromContent, stripBridgeContext, isSyntheticUserText, deriveTitle, toEpochMs
 } from '../normalize.js';
+import { isSettled } from '../turns.js';
 
 const SESSION_FILE_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
@@ -120,13 +121,58 @@ export async function discoverWorkbuddy(config) {
 export async function parseWorkbuddy(sourcePath, discovery) {
   const messages = [];
   const ownerByMessageId = new Map();
+  const turns = [];
   let lastAssistant = -1;
+  let openTurn = null;
 
   let nativeId = discovery?.nativeId;
   let cwd = null;
   let createdAt = null;
   let firstUserText = '';
   let aiTitle = '';
+
+  // WorkBuddy writes no completion record. A turn is structurally terminal when its
+  // last visible item is a completed assistant text and no call shares that messageId;
+  // the call for a model step is appended after its text, so emission waits for the
+  // file to settle before declaring the turn finished.
+  function evaluateTurn(turn) {
+    const text = turn.lastAssistantText;
+    if (turn.lastKind === 'text' && text) {
+      if (text.status === 'incomplete' && text.hasError) return 'aborted';
+      if (text.status === 'completed' && !turn.callMessageIds.has(text.messageId)) {
+        return 'completed';
+      }
+    }
+    if (turn.lastKind === 'user' || turn.pendingCalls.size > 0) return 'interrupted';
+    return null;
+  }
+
+  function pushTurn(turn, status, endedAt) {
+    if (!turn || turn.promptIndex === null || !status) return;
+    turns.push({
+      turnId: turn.turnId,
+      status,
+      signal: 'inferred',
+      startedAt: turn.startedAt,
+      endedAt: endedAt ?? turn.startedAt,
+      promptIndex: turn.promptIndex,
+      finalIndex: status === 'completed' && turn.lastAssistantText
+        ? turn.lastAssistantText.index
+        : null
+    });
+  }
+
+  function closeOpenTurn(endedAt) {
+    if (!openTurn) return;
+    pushTurn(openTurn, evaluateTurn(openTurn) ?? 'interrupted', endedAt);
+    openTurn = null;
+  }
+
+  function touch(kind, at) {
+    if (!openTurn) return;
+    openTurn.lastKind = kind;
+    if (at !== null && at !== undefined) openTurn.lastAt = at;
+  }
 
   function ownerIndex(messageId, at = null) {
     if (messageId && ownerByMessageId.has(messageId)) {
@@ -145,17 +191,13 @@ export async function parseWorkbuddy(sourcePath, discovery) {
     return lastAssistant;
   }
 
-  function assistantFor(entry) {
+  function assistantIndexFor(entry) {
     const messageId = entry.providerData?.messageId ?? null;
     const at = toEpochMs(entry.timestamp);
-    if (messageId) {
-      const index = ownerIndex(messageId, at);
-      return messages[index];
-    }
+    if (messageId) return ownerIndex(messageId, at);
     lastAssistant = messages.length;
-    const message = emptyAssistant(at);
-    messages.push(message);
-    return message;
+    messages.push(emptyAssistant(at));
+    return lastAssistant;
   }
 
   const stream = createReadStream(sourcePath, { encoding: 'utf8' });
@@ -198,24 +240,55 @@ export async function parseWorkbuddy(sourcePath, discovery) {
           const plainText = cleanUserText(textFromContent(entry.content));
           const text = userText(entry.content);
           if (!text || isSyntheticUserText(text) || text.startsWith('<teammate-message')) continue;
+          if (/^<(cb_summary|conversation_history_summary)\b/.test(text)) continue;
           if (!firstUserText && plainText) firstUserText = plainText;
+
+          const at = toEpochMs(entry.timestamp);
+          const startsTurn = entry.providerData?.startsNewUserRequest !== false;
+          if (startsTurn) closeOpenTurn(at);
           messages.push({
             role: 'user',
-            at: toEpochMs(entry.timestamp),
+            at,
             text,
             thinking: null,
             toolCalls: [],
             toolResults: []
           });
+          if (startsTurn) {
+            openTurn = {
+              promptIndex: messages.length - 1,
+              startedAt: at,
+              turnId: entry.providerData?.conversationRequestId ?? entry.id ?? null,
+              callMessageIds: new Set(),
+              pendingCalls: new Set(),
+              lastKind: 'user',
+              lastAt: at,
+              lastAssistantText: null
+            };
+          } else {
+            touch('user', at);
+          }
           continue;
         }
 
         if (entry.role === 'assistant') {
           const text = textFromContent(entry.content);
-          const owner = assistantFor(entry);
+          const index = assistantIndexFor(entry);
+          const owner = messages[index];
           if (text) owner.text = owner.text ? `${owner.text}\n${text}` : text;
           const at = toEpochMs(entry.timestamp);
           if (at !== null) owner.at = at;
+          if (text) {
+            if (openTurn) {
+              openTurn.lastAssistantText = {
+                index,
+                messageId: entry.providerData?.messageId ?? null,
+                status: typeof entry.status === 'string' ? entry.status : null,
+                hasError: Boolean(entry.providerData?.error)
+              };
+            }
+            touch('text', at);
+          }
         }
         continue;
       }
@@ -237,27 +310,36 @@ export async function parseWorkbuddy(sourcePath, discovery) {
         if (typeof input === 'string') {
           try { input = JSON.parse(input); } catch {}
         }
-        const owner = messages[ownerIndex(
-          entry.providerData?.messageId ?? null, toEpochMs(entry.timestamp)
-        )];
+        const messageId = entry.providerData?.messageId ?? null;
+        const at = toEpochMs(entry.timestamp);
+        const owner = messages[ownerIndex(messageId, at)];
+        const callId = entry.callId ?? entry.id ?? null;
         owner.toolCalls.push({
-          id: entry.callId ?? entry.id ?? null,
+          id: callId,
           name: entry.name ?? null,
           input
         });
+        if (openTurn) {
+          if (messageId) openTurn.callMessageIds.add(messageId);
+          if (callId) openTurn.pendingCalls.add(callId);
+        }
+        touch('call', at);
         continue;
       }
 
       if (entry.type === 'function_call_result') {
         if (isInternal(entry)) continue;
-        const owner = messages[ownerIndex(
-          entry.providerData?.messageId ?? null, toEpochMs(entry.timestamp)
-        )];
+        const messageId = entry.providerData?.messageId ?? null;
+        const at = toEpochMs(entry.timestamp);
+        const owner = messages[ownerIndex(messageId, at)];
+        const callId = entry.callId ?? null;
         owner.toolResults.push({
-          callId: entry.callId ?? null,
+          callId,
           output: resultOutput(entry.output),
           isError: entry.status !== 'completed'
         });
+        if (openTurn && callId) openTurn.pendingCalls.delete(callId);
+        touch('result', at);
       }
     }
   } finally {
@@ -265,16 +347,43 @@ export async function parseWorkbuddy(sourcePath, discovery) {
     stream.destroy();
   }
 
-  const visible = messages.filter(message =>
-    message.text || message.thinking ||
-    message.toolCalls.length > 0 || message.toolResults.length > 0
-  );
+  if (openTurn) {
+    const status = evaluateTurn(openTurn);
+    if (status && isSettled(discovery?.mtimeMs)) {
+      pushTurn(openTurn, status, openTurn.lastAt);
+      openTurn = null;
+    }
+  }
+
+  // Drop empty grouping shells, then remap turn indices onto the returned messages.
+  const visible = [];
+  const visibleIndex = new Map();
+  messages.forEach((message, index) => {
+    if (
+      message.text || message.thinking ||
+      message.toolCalls.length > 0 || message.toolResults.length > 0
+    ) {
+      visibleIndex.set(index, visible.length);
+      visible.push(message);
+    }
+  });
+
+  const visibleTurns = turns
+    .map(turn => ({
+      ...turn,
+      promptIndex: visibleIndex.get(turn.promptIndex) ?? -1,
+      finalIndex: turn.finalIndex === null || turn.finalIndex === undefined
+        ? null
+        : visibleIndex.get(turn.finalIndex) ?? null
+    }))
+    .filter(turn => turn.promptIndex >= 0);
 
   return {
     nativeId: nativeId || path.basename(sourcePath).replace(/\.jsonl$/i, ''),
     title: aiTitle || deriveTitle(firstUserText),
     cwd,
     createdAt,
-    messages: visible
+    messages: visible,
+    turns: visibleTurns
   };
 }

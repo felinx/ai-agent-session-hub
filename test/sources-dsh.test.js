@@ -81,3 +81,87 @@ test('missing projcache and corrupt compressed files do not affect other session
   assert.equal(files.length, 2);
   await assert.rejects(parseDsh(bad));
 });
+
+const T0 = 1795000000000;
+
+function turnLines(reasonKind = 'completed', n = 1) {
+  return [
+    { type: 'turn/start', seq: n * 10, time: T0 + n * 1000, data: { turn: n } },
+    {
+      type: 'user/message', seq: n * 10 + 1, time: T0 + n * 1000 + 100,
+      data: { id: `u${n}`, role: 'user', content: [{ type: 'text', text: `问题${n}` }], source: { kind: 'user' } }
+    },
+    {
+      type: 'assistant/message', seq: n * 10 + 2, time: T0 + n * 1000 + 200,
+      data: { message: { role: 'assistant', content: [{ type: 'text', text: `答案${n}` }] } }
+    },
+    { type: 'turn/end', seq: n * 10 + 3, time: T0 + n * 1000 + 300, data: { turn: n, reason: { kind: reasonKind } } }
+  ];
+}
+
+function writeTurnSession(lines) {
+  const root = mkdtempSync(path.join(tmpdir(), 'session-hub-dsh-turn-'));
+  return writeSession(root, 'slug', 'session-turns', [
+    { type: 'session', id: 'session-turns', createdAt: T0, cwd: '/tmp/dsh' },
+    ...lines
+  ]);
+}
+
+test('turns pair turn/start with turn/end', async () => {
+  const file = writeTurnSession(turnLines('completed', 1));
+  const p = await parseDsh(file);
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].turnId, '1');
+  assert.equal(p.turns[0].status, 'completed');
+  assert.equal(p.turns[0].signal, 'native');
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '问题1');
+  assert.equal(p.messages[p.turns[0].finalIndex].text, '答案1');
+  assert.equal(p.turns[0].startedAt, T0 + 1000);
+  assert.equal(p.turns[0].endedAt, T0 + 1300);
+});
+
+test('dsh reason kinds map to normalized statuses', async () => {
+  const kinds = ['completed', 'blocked', 'aborted', 'error'];
+  const file = writeTurnSession(kinds.flatMap((kind, index) => turnLines(kind, index + 1)));
+  const p = await parseDsh(file);
+  assert.deepEqual(p.turns.map(turn => turn.status), kinds);
+});
+
+test('a new turn/start without a turn/end closes the previous turn as interrupted', async () => {
+  const file = writeTurnSession([
+    { type: 'turn/start', seq: 1, time: T0, data: { turn: 1 } },
+    {
+      type: 'user/message', seq: 2, time: T0 + 100,
+      data: { role: 'user', content: [{ type: 'text', text: '第一问' }], source: { kind: 'user' } }
+    },
+    { type: 'turn/start', seq: 3, time: T0 + 1000, data: { turn: 2 } },
+    {
+      type: 'user/message', seq: 4, time: T0 + 1100,
+      data: { role: 'user', content: [{ type: 'text', text: '第二问' }], source: { kind: 'user' } }
+    },
+    {
+      type: 'assistant/message', seq: 5, time: T0 + 1200,
+      data: { message: { role: 'assistant', content: [{ type: 'text', text: '答案' }] } }
+    },
+    { type: 'turn/end', seq: 6, time: T0 + 1300, data: { turn: 2, reason: { kind: 'completed' } } }
+  ]);
+  const p = await parseDsh(file);
+  assert.deepEqual(p.turns.map(turn => turn.status), ['interrupted', 'completed']);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '第一问');
+  assert.equal(p.turns[0].finalIndex, null);
+});
+
+test('EOF with an unresolved tool call after the settle window is interrupted', async () => {
+  const file = writeTurnSession([
+    { type: 'turn/start', seq: 1, time: T0, data: { turn: 1 } },
+    {
+      type: 'user/message', seq: 2, time: T0 + 100,
+      data: { role: 'user', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' } }
+    },
+    { type: 'tool/call', seq: 3, time: T0 + 200, data: { callId: 'c1', name: 'bash', arguments: '{}' } }
+  ]);
+  assert.equal((await parseDsh(file, { mtimeMs: Date.now() })).turns.length, 0);
+  const stale = await parseDsh(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(stale.turns.length, 1);
+  assert.equal(stale.turns[0].status, 'interrupted');
+});

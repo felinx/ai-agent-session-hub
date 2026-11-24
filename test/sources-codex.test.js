@@ -91,3 +91,92 @@ test('skips trailing partial lines and unknown events', async () => {
   const p = await parseCodex(target);
   assert.equal(p.messages.length, 2);
 });
+
+function writeCodex(lines) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-codex-turn-'));
+  const target = path.join(dir, 'rollout-turn.jsonl');
+  writeFileSync(target, lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+  return target;
+}
+
+function meta() {
+  return { type: 'session_meta', payload: { id: 'turn-1', cwd: '/tmp/codex' } };
+}
+
+function task(type, turnId, timestamp, extra = {}) {
+  return { type: 'event_msg', timestamp, payload: { type, turn_id: turnId, ...extra } };
+}
+
+function message(role, text, timestamp) {
+  return {
+    type: 'response_item', timestamp,
+    payload: { type: 'message', role, content: [{ type: 'input_text', text }] }
+  };
+}
+
+test('turns pair task_started with task_complete by turn_id', async () => {
+  const target = writeCodex([
+    meta(),
+    task('task_started', 't1', '2026-11-01T00:00:01.000Z'),
+    message('user', '问题', '2026-11-01T00:00:01.500Z'),
+    message('assistant', '中间', '2026-11-01T00:00:02.000Z'),
+    message('assistant', '答案', '2026-11-01T00:00:05.000Z'),
+    task('task_complete', 't1', '2026-11-01T00:00:09.000Z', { last_agent_message: '答案' })
+  ]);
+  const p = await parseCodex(target);
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].turnId, 't1');
+  assert.equal(p.turns[0].status, 'completed');
+  assert.equal(p.turns[0].signal, 'native');
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '问题');
+  assert.equal(p.messages[p.turns[0].finalIndex].text, '答案');
+  assert.equal(p.turns[0].startedAt, Date.parse('2026-11-01T00:00:01.000Z'));
+  assert.equal(p.turns[0].endedAt, Date.parse('2026-11-01T00:00:09.000Z'));
+});
+
+test('a new task_started without task_complete closes the old turn as interrupted', async () => {
+  const target = writeCodex([
+    meta(),
+    task('task_started', 't1', '2026-11-01T00:00:01.000Z'),
+    message('user', '第一问', '2026-11-01T00:00:01.500Z'),
+    task('task_started', 't2', '2026-11-01T00:00:02.000Z'),
+    message('user', '第二问', '2026-11-01T00:00:02.500Z'),
+    message('assistant', '答案', '2026-11-01T00:00:03.000Z'),
+    task('task_complete', 't2', '2026-11-01T00:00:04.000Z')
+  ]);
+  const p = await parseCodex(target);
+  assert.deepEqual(p.turns.map(turn => turn.status), ['interrupted', 'completed']);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '第一问');
+  assert.equal(p.turns[0].finalIndex, null);
+  assert.equal(p.messages[p.turns[1].promptIndex].text, '第二问');
+});
+
+test('a second user message inside one task is intermediate', async () => {
+  const target = writeCodex([
+    meta(),
+    task('task_started', 't1', '2026-11-01T00:00:01.000Z'),
+    message('user', '第一问', '2026-11-01T00:00:01.500Z'),
+    message('user', '补充', '2026-11-01T00:00:02.000Z'),
+    message('assistant', '答案', '2026-11-01T00:00:03.000Z'),
+    task('task_complete', 't1', '2026-11-01T00:00:04.000Z')
+  ]);
+  const p = await parseCodex(target);
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '第一问');
+});
+
+test('EOF with an unresolved tool call after the settle window is interrupted', async () => {
+  const target = writeCodex([
+    meta(),
+    task('task_started', 't1', '2026-11-01T00:00:01.000Z'),
+    message('user', '问题', '2026-11-01T00:00:01.500Z'),
+    {
+      type: 'response_item', timestamp: '2026-11-01T00:00:02.000Z',
+      payload: { type: 'function_call', id: 'fc_1', call_id: 'c1', name: 'shell', arguments: '{}' }
+    }
+  ]);
+  assert.equal((await parseCodex(target, { mtimeMs: Date.now() })).turns.length, 0);
+  const stale = await parseCodex(target, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(stale.turns.length, 1);
+  assert.equal(stale.turns[0].status, 'interrupted');
+});

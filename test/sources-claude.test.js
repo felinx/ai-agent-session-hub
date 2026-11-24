@@ -75,3 +75,116 @@ test('parses oversized tool results', async () => {
   assert.equal(p.messages.length, 1);
   assert.equal(p.messages[0].toolResults[0].output.length, big.length);
 });
+
+function writeClaude(lines) {
+  const dir = tmp();
+  const target = path.join(dir, 'session.jsonl');
+  writeFileSync(target, lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+  return target;
+}
+
+function assistant(id, content, stopReason, extra = {}) {
+  return {
+    type: 'assistant', sessionId: 's', timestamp: '2026-11-01T00:00:01.000Z',
+    message: { id, role: 'assistant', stop_reason: stopReason, content }, ...extra
+  };
+}
+
+function user(content, extra = {}) {
+  return {
+    type: 'user', sessionId: 's', timestamp: '2026-11-01T00:00:00.000Z',
+    message: { role: 'user', content }, ...extra
+  };
+}
+
+test('turns end only on a terminal stop_reason', async () => {
+  const file = writeClaude([
+    user('问题'),
+    assistant('m1', [{ type: 'thinking', thinking: '想' }], 'tool_use'),
+    assistant('m1', [
+      { type: 'text', text: '中间' },
+      { type: 'tool_use', id: 'c1', name: 'Bash', input: {} }
+    ], 'tool_use'),
+    user([{ type: 'tool_result', tool_use_id: 'c1', content: 'ok' }]),
+    assistant('m2', [{ type: 'text', text: '答案' }], 'end_turn')
+  ]);
+  const p = await parseClaude(file);
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].turnId, 'm2');
+  assert.equal(p.turns[0].status, 'completed');
+  assert.equal(p.turns[0].signal, 'native');
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '问题');
+  assert.equal(p.messages[p.turns[0].finalIndex].text, '答案');
+});
+
+test('split lines of one message join before the terminal reason is read', async () => {
+  const file = writeClaude([
+    user('问题'),
+    assistant('m1', [{ type: 'thinking', thinking: '想' }], 'end_turn'),
+    assistant('m1', [{ type: 'text', text: '答案' }], 'end_turn')
+  ]);
+  const p = await parseClaude(file);
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.turns[0].turnId, 'm1');
+  assert.equal(p.turns[0].finalText, '答案');
+});
+
+test('max_tokens ends the turn as truncated', async () => {
+  const file = writeClaude([
+    user('问题'),
+    assistant('m1', [{ type: 'text', text: '半截' }], 'max_tokens')
+  ]);
+  const p = await parseClaude(file);
+  assert.equal(p.turns[0].status, 'truncated');
+});
+
+test('a queued prompt mid-turn is an intermediate message, not a new turn', async () => {
+  const file = writeClaude([
+    user('第一问'),
+    assistant('m1', [{ type: 'tool_use', id: 'c1', name: 'Bash', input: {} }], 'tool_use'),
+    user([{ type: 'tool_result', tool_use_id: 'c1', content: 'ok' }]),
+    user('补充要求'),
+    assistant('m2', [{ type: 'text', text: '答案' }], 'end_turn')
+  ]);
+  const p = await parseClaude(file);
+  assert.equal(p.turns.length, 1);
+  assert.equal(p.messages[p.turns[0].promptIndex].text, '第一问');
+});
+
+test('a second prompt after a completed turn starts a new turn', async () => {
+  const file = writeClaude([
+    user('第一问'),
+    assistant('m1', [{ type: 'text', text: '答一' }], 'end_turn'),
+    user('第二问'),
+    assistant('m2', [{ type: 'text', text: '答二' }], 'end_turn')
+  ]);
+  const p = await parseClaude(file);
+  assert.deepEqual(p.turns.map(turn => turn.turnId), ['m1', 'm2']);
+  assert.deepEqual(
+    p.turns.map(turn => p.messages[turn.promptIndex].text),
+    ['第一问', '第二问']
+  );
+});
+
+test('EOF with an unresolved tool call after the settle window is interrupted', async () => {
+  const file = writeClaude([
+    user('问题'),
+    assistant('m1', [{ type: 'tool_use', id: 'c1', name: 'Bash', input: {} }], 'tool_use')
+  ]);
+  const recent = await parseClaude(file, { mtimeMs: Date.now() });
+  assert.equal(recent.turns.length, 0);
+
+  const stale = await parseClaude(file, { mtimeMs: Date.now() - 60_000 });
+  assert.equal(stale.turns.length, 1);
+  assert.equal(stale.turns[0].status, 'interrupted');
+  assert.equal(stale.turns[0].finalIndex, null);
+});
+
+test('sidechain entries do not start or end turns', async () => {
+  const file = writeClaude([
+    { type: 'user', sessionId: 's', isSidechain: true, message: { role: 'user', content: '子任务' } },
+    assistant('m1', [{ type: 'text', text: '子答案' }], 'end_turn', { isSidechain: true })
+  ]);
+  const p = await parseClaude(file);
+  assert.equal(p.turns.length, 0);
+});

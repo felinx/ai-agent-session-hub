@@ -4,6 +4,7 @@ import { zstdDecompressSync } from 'node:zlib';
 import {
   textFromContent, stripBridgeContext, isSyntheticUserText, deriveTitle, toEpochMs
 } from '../normalize.js';
+import { isSettled } from '../turns.js';
 
 const SESSION_FILE = 'session.v4.jsonl.zstd';
 const LARK_DIR_RE = /^lark-(oc_[A-Za-z0-9]+)/;
@@ -87,16 +88,42 @@ function lastAssistantIndex(messages) {
   return -1;
 }
 
+const STATUS_BY_REASON = {
+  completed: 'completed',
+  blocked: 'blocked',
+  aborted: 'aborted',
+  error: 'error'
+};
+
 export async function parseDsh(sourcePath, discovery) {
   const raw = zstdDecompressSync(await readFile(sourcePath)).toString('utf8');
   const messages = [];
   const callOwner = new Map();
+  const turns = [];
+  const unresolvedCalls = new Set();
 
   let nativeId = discovery?.nativeId;
   let cwd = null;
   let createdAt = null;
   let firstUserText = '';
   let explicitTitle = null;
+  let openTurn = null;
+
+  function closeOpenTurn(status, endedAt, finalIndex = null) {
+    if (openTurn && openTurn.promptIndex !== null) {
+      turns.push({
+        turnId: openTurn.turnId,
+        status,
+        signal: 'native',
+        startedAt: openTurn.startedAt,
+        endedAt,
+        promptIndex: openTurn.promptIndex,
+        finalIndex
+      });
+    }
+    openTurn = null;
+    unresolvedCalls.clear();
+  }
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -121,6 +148,26 @@ export async function parseDsh(sourcePath, discovery) {
         if (createdAt === null) createdAt = toEpochMs(info.createdAt);
         break;
       }
+      case 'turn/start': {
+        closeOpenTurn('interrupted', messages[messages.length - 1]?.at ?? at);
+        openTurn = {
+          turnId: data.turn === undefined || data.turn === null ? null : String(data.turn),
+          startedAt: at,
+          promptIndex: null
+        };
+        break;
+      }
+      case 'turn/end': {
+        if (!openTurn) break;
+        const kind = data.reason?.kind;
+        const finalIndex = lastAssistantIndex(messages);
+        closeOpenTurn(
+          STATUS_BY_REASON[kind] ?? 'error',
+          at,
+          finalIndex >= openTurn.promptIndex ? finalIndex : null
+        );
+        break;
+      }
       case 'user/message': {
         const kind = data.source?.kind;
         if (kind !== undefined && !VISIBLE_USER_KINDS.has(kind)) break;
@@ -128,6 +175,9 @@ export async function parseDsh(sourcePath, discovery) {
         if (!cleaned || isSyntheticUserText(cleaned)) break;
         if (!firstUserText) firstUserText = cleaned;
         messages.push({ role: 'user', at, text: cleaned, thinking: null, toolCalls: [], toolResults: [] });
+        if (openTurn && openTurn.promptIndex === null) {
+          openTurn.promptIndex = messages.length - 1;
+        }
         break;
       }
       case 'assistant/message': {
@@ -159,7 +209,10 @@ export async function parseDsh(sourcePath, discovery) {
         }
         const callId = data.callId ?? data.id ?? null;
         messages[owner].toolCalls.push({ id: callId, name: data.name ?? null, input });
-        if (callId) callOwner.set(callId, owner);
+        if (callId) {
+          callOwner.set(callId, owner);
+          unresolvedCalls.add(callId);
+        }
         break;
       }
       case 'tool/result': {
@@ -169,6 +222,7 @@ export async function parseDsh(sourcePath, discovery) {
           output: textFromContent(data.content ?? data.message?.content),
           isError: !!data.isError
         };
+        if (callId) unresolvedCalls.delete(callId);
         const owner = callId !== null ? callOwner.get(callId) : undefined;
         const target = owner ?? lastAssistantIndex(messages);
         if (target >= 0) messages[target].toolResults.push(result);
@@ -179,11 +233,23 @@ export async function parseDsh(sourcePath, discovery) {
     }
   }
 
+  if (openTurn) {
+    const last = messages[messages.length - 1];
+    const settled = isSettled(discovery?.mtimeMs);
+    if (
+      settled && openTurn.promptIndex !== null &&
+      (last?.role === 'user' || unresolvedCalls.size > 0)
+    ) {
+      closeOpenTurn('interrupted', last?.at ?? null);
+    }
+  }
+
   return {
     nativeId: nativeId ?? path.basename(path.dirname(sourcePath)),
     title: explicitTitle || deriveTitle(firstUserText),
     cwd,
     createdAt,
-    messages
+    messages,
+    turns
   };
 }
