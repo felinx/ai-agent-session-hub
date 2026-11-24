@@ -174,7 +174,7 @@ async function logsCommand(options, io) {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     try {
-      await followLogs(config.logDir, { out: io.out, signal: controller.signal });
+      await followLogs(config.logDir, { out: io.out, signal: controller.signal, fromEnd: true });
     } finally {
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);

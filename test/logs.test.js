@@ -68,3 +68,26 @@ test('followLogs prints existing lines and then appended ones until aborted', as
 
   assert.deepEqual(seen, ['one', 'two']);
 });
+
+test('followLogs can start at the end so a tail is not printed twice', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-logs-'));
+  const file = path.join(dir, 'hub-2026-11-24.log');
+  writeFileSync(file, 'one\n');
+
+  const seen = [];
+  const controller = new AbortController();
+  const running = followLogs(dir, {
+    out: (line) => seen.push(line),
+    signal: controller.signal,
+    intervalMs: 10,
+    fromEnd: true
+  });
+
+  await sleep(50);
+  appendFileSync(file, 'two\n');
+  await sleep(100);
+  controller.abort();
+  await running;
+
+  assert.deepEqual(seen, ['two']);
+});

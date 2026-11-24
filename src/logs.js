@@ -51,17 +51,24 @@ export function clearLogs(dir) {
 }
 
 // Follow the newest log file, printing what is already there and then what gets
-// appended. Switching to a newly rotated file restarts at its beginning.
-export async function followLogs(dir, { out, signal, intervalMs = 300, sleepImpl = sleep }) {
+// appended. `fromEnd` skips the current contents (used after printing a tail).
+// Switching to a newly rotated file restarts at its beginning.
+export async function followLogs(dir, { out, signal, intervalMs = 300, fromEnd = false, sleepImpl = sleep }) {
   let current = null;
   let offset = 0;
+  let first = true;
 
   while (!signal?.aborted) {
     const newest = listLogFiles(dir).at(-1);
     if (newest) {
       if (newest.path !== current) {
         current = newest.path;
-        offset = 0;
+        try {
+          offset = first && fromEnd ? statSync(current).size : 0;
+        } catch {
+          offset = 0;
+        }
+        first = false;
       }
       try {
         const size = statSync(current).size;
