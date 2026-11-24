@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openDb, initSchema, replaceSession, appendEvent } from '../src/db.js';
 import { createServer } from '../src/server.js';
+import { sessionId } from '../src/session-id.js';
 
 function seed(db) {
   const base = {
@@ -488,11 +489,11 @@ test('GET /api/status reports scan state and per-agent statistics', async (t) =>
 
 function seedEvents(db) {
   appendEvent(db, {
-    type: 'session.updated', sessionKey: 'claude:a', agent: 'claude', at: 10,
+    type: 'session.updated', sessionKey: 'claude:a', agent: 'claude', cwd: '/p1', at: 10,
     payload: { session: { key: 'claude:a' } }
   });
   appendEvent(db, {
-    type: 'turn.completed', sessionKey: 'codex:b', agent: 'codex', at: 20,
+    type: 'turn.completed', sessionKey: 'codex:b', agent: 'codex', cwd: '/p2', at: 20,
     payload: { turn: { turnSeq: 1, status: 'completed' } }
   });
   appendEvent(db, {
@@ -684,4 +685,41 @@ test('GET /api/turn and /api/turn/messages expose turn metadata and content', as
   assert.equal((await fetch(s.base + '/api/turn?key=nope&turn=1')).status, 404);
   assert.equal((await fetch(s.base + '/api/turn?key=claude:a&turn=9')).status, 404);
   assert.equal((await fetch(s.base + '/api/turn/messages?key=nope&turn=1')).status, 404);
+});
+
+test('GET /api/events scopes by agent, project, and internal session id', async (t) => {
+  const s = await makeServer(seedEvents);
+  t.after(() => s.close());
+
+  const byAgent = await (await fetch(s.base + '/api/events?scope=agent:codex')).json();
+  assert.deepEqual(byAgent.events.map(event => event.seq), [2]);
+
+  const byProject = await (await fetch(
+    s.base + '/api/events?scope=' + encodeURIComponent('project:/p1')
+  )).json();
+  assert.deepEqual(byProject.events.map(event => event.seq), [1]);
+
+  const byId = await (await fetch(
+    s.base + '/api/events?scope=' + encodeURIComponent(`session:${sessionId('claude:a')}`)
+  )).json();
+  assert.deepEqual(byId.events.map(event => event.seq), [1]);
+
+  const invalid = await fetch(s.base + '/api/events?scope=unknown');
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).code, 'error.invalidScope');
+
+  const empty = await fetch(s.base + '/api/events?scope=agent:');
+  assert.equal(empty.status, 400);
+});
+
+test('GET /api/events/stream honors scope', async (t) => {
+  const s = await makeServer(seedEvents);
+  const stream = openStream(s.base + '/api/events/stream?since=0&scope=agent:claude');
+  t.after(() => { stream.close(); return s.close(); });
+
+  await untilStream(stream, text => text.includes('id: 1'));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.match(stream.buffer, /^id: 1\n/m);
+  assert.equal(stream.buffer.includes('id: 2\n'), false);
+  assert.equal(stream.buffer.includes('event: sync.completed'), false);
 });

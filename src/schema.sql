@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS events (
   seq         INTEGER PRIMARY KEY AUTOINCREMENT,
   type        TEXT NOT NULL,
   session_key TEXT,
+  session_id  TEXT,
   agent       TEXT,
+  cwd         TEXT,
   at          INTEGER NOT NULL,
   payload     TEXT NOT NULL
 );

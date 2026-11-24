@@ -122,6 +122,20 @@ function parseFilterList(value) {
   return items.length ? items : null;
 }
 
+// `scope` selects the sessions a subscription follows: all, one agent, one
+// project directory, or one internal session id / session key.
+function parseScope(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '' || raw.trim() === 'all') {
+    return { scope: null };
+  }
+  const value = raw.trim();
+  const colon = value.indexOf(':');
+  const kind = colon > 0 ? value.slice(0, colon) : '';
+  const rest = colon > 0 ? value.slice(colon + 1) : '';
+  if (!rest || !['agent', 'project', 'session'].includes(kind)) return { error: true };
+  return { scope: { kind, value: rest } };
+}
+
 function positiveInt(value, fallback, cap) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
@@ -244,7 +258,7 @@ export function createServer({
 
   // Server-Sent Events channel. Each connection polls the event log on the main
   // thread (no long-lived database handle) and stops as soon as the client leaves.
-  function startEventStream(req, res, { since, agents, types }) {
+  function startEventStream(req, res, { since, agents, types, scope = null }) {
     res.writeHead(200, {
       ...SECURITY_HEADERS,
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -281,7 +295,8 @@ export function createServer({
       if (stopped || res.writableEnded) return;
       for (;;) {
         const page = eventsSince(db, {
-          since: cursor, limit: SSE_PAGE_LIMIT, maxBytes: EVENT_BYTES_DEFAULT, agents, types
+          since: cursor, limit: SSE_PAGE_LIMIT, maxBytes: EVENT_BYTES_DEFAULT,
+          agents, types, scope
         });
         if (page.resync) {
           sendResync(page.cursor);
@@ -402,13 +417,16 @@ export function createServer({
         const maxBytes = positiveInt(params.get('maxBytes'), EVENT_BYTES_DEFAULT, EVENT_BYTES_MAX);
         const agents = parseFilterList(params.get('agent'));
         const types = parseFilterList(params.get('type'));
+        const parsedScope = parseScope(params.get('scope'));
+        if (parsedScope.error) return sendError(res, 400, lang, 'error.invalidScope');
+        const scope = parsedScope.scope;
         const waitRaw = Number(params.get('wait'));
         const waitSeconds = Number.isFinite(waitRaw)
           ? Math.min(Math.max(waitRaw, 0), EVENT_WAIT_MAX_SECONDS)
           : 0;
         const deadline = Date.now() + waitSeconds * 1000;
 
-        const read = () => eventsSince(db, { since, limit, maxBytes, agents, types });
+        const read = () => eventsSince(db, { since, limit, maxBytes, agents, types, scope });
         let body = read();
         while (
           waitSeconds > 0 && body.events.length === 0 && !body.resync &&
@@ -430,10 +448,13 @@ export function createServer({
           head
         );
         if (since === null) return sendError(res, 400, lang, 'error.invalidCursor');
+        const parsedScope = parseScope(url.searchParams.get('scope'));
+        if (parsedScope.error) return sendError(res, 400, lang, 'error.invalidScope');
         startEventStream(req, res, {
           since,
           agents: parseFilterList(url.searchParams.get('agent')),
-          types: parseFilterList(url.searchParams.get('type'))
+          types: parseFilterList(url.searchParams.get('type')),
+          scope: parsedScope.scope
         });
         return;
       }

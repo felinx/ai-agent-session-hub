@@ -33,13 +33,37 @@ export function openDb(dbPath) {
   return db;
 }
 
+function ensureColumn(db, table, name, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some(column => column.name === name)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  return true;
+}
+
 export function initSchema(db) {
   db.exec(schemaSql);
-  // Existing databases predate the turn text columns; add them in place so
-  // /api/turn can rebuild the same text the event carried.
-  const columns = new Set(db.prepare('PRAGMA table_info(turns)').all().map(row => row.name));
-  if (!columns.has('prompt_text')) db.exec('ALTER TABLE turns ADD COLUMN prompt_text TEXT');
-  if (!columns.has('final_text')) db.exec('ALTER TABLE turns ADD COLUMN final_text TEXT');
+  // Existing databases predate the turn text and event scope columns. Add them in
+  // place so /api/turn can rebuild the event text and scope filters can use indexes
+  // instead of parsing payload JSON.
+  ensureColumn(db, 'turns', 'prompt_text', 'TEXT');
+  ensureColumn(db, 'turns', 'final_text', 'TEXT');
+  const addedSessionId = ensureColumn(db, 'events', 'session_id', 'TEXT');
+  const addedCwd = ensureColumn(db, 'events', 'cwd', 'TEXT');
+  if (addedSessionId) {
+    const update = db.prepare('UPDATE events SET session_id = ? WHERE seq = ?');
+    for (const row of db.prepare(
+      'SELECT seq, session_key AS sessionKey FROM events WHERE session_key IS NOT NULL'
+    ).all()) {
+      update.run(sessionId(row.sessionKey), row.seq);
+    }
+  }
+  if (addedCwd) {
+    db.exec(`
+      UPDATE events SET cwd = (
+        SELECT cwd FROM sessions WHERE sessions.key = events.session_key
+      ) WHERE session_key IS NOT NULL
+    `);
+  }
   secureDbFiles(dbPaths.get(db));
 }
 
@@ -99,6 +123,7 @@ function appendSessionEvent(db, session, messages, kind, now) {
     type: `session.${kind}`,
     sessionKey: session.key,
     agent: session.agent,
+    cwd: session.cwd ?? null,
     at: now,
     payload: {
       session: {
@@ -171,6 +196,7 @@ function insertTurns(db, session, messages, turns, priorTurns, now) {
         type: 'turn.completed',
         sessionKey: session.key,
         agent: session.agent,
+        cwd: session.cwd ?? null,
         at: now,
         payload: { turn: turnObject }
       });
@@ -288,13 +314,16 @@ export function pruneMissing(db, keepPaths, { events = false, now = Date.now() }
     const deleteSync = db.prepare('DELETE FROM sync_state WHERE source_path = ?');
 
     const removed = [];
-    for (const row of db.prepare('SELECT key, agent, title, source_path FROM sessions').all()) {
+    for (const row of db.prepare(
+      'SELECT key, agent, title, cwd, source_path FROM sessions'
+    ).all()) {
       if (!keepPaths.has(row.source_path)) {
         if (events) {
           appendEvent(db, {
             type: 'session.removed',
             sessionKey: row.key,
             agent: row.agent,
+            cwd: row.cwd,
             at: now,
             payload: {
               session: { key: row.key, id: sessionId(row.key), agent: row.agent }
@@ -332,11 +361,16 @@ export function clearAll(db) {
 }
 
 export function appendEvent(db, {
-  type, sessionKey = null, agent = null, at = Date.now(), payload = {}
+  type, sessionKey = null, agent = null, cwd = null, at = Date.now(), payload = {}
 }) {
+  // Scope columns are stored eagerly: filtering the feed must not parse payload JSON.
   return Number(db.prepare(
-    'INSERT INTO events (type, session_key, agent, at, payload) VALUES (?, ?, ?, ?, ?)'
-  ).run(type, sessionKey, agent, at, JSON.stringify(payload)).lastInsertRowid);
+    `INSERT INTO events (type, session_key, session_id, agent, cwd, at, payload)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    type, sessionKey, sessionKey ? sessionId(sessionKey) : null, agent, cwd, at,
+    JSON.stringify(payload)
+  ).lastInsertRowid);
 }
 
 // Highest seq ever assigned, even when every row has been pruned. sqlite_sequence
@@ -357,7 +391,8 @@ export function eventsSince(db, {
   limit = 200,
   maxBytes = 8 * 1024 * 1024,
   agents = null,
-  types = null
+  types = null,
+  scope = null
 } = {}) {
   const head = getLastEventSeq(db);
   const oldest = db.prepare('SELECT min(seq) AS seq FROM events').get()?.seq ?? null;
@@ -379,6 +414,20 @@ export function eventsSince(db, {
     else {
       where.push(`type IN (${types.map(() => '?').join(', ')})`);
       params.push(...types);
+    }
+  }
+  if (scope && scope.kind && scope.value !== undefined && scope.value !== null) {
+    if (scope.kind === 'agent') {
+      where.push('agent = ?');
+      params.push(scope.value);
+    } else if (scope.kind === 'project') {
+      where.push('cwd = ?');
+      params.push(scope.value);
+    } else if (scope.kind === 'session') {
+      // Accept both the internal id and the full session key.
+      if (String(scope.value).includes(':')) where.push('session_key = ?');
+      else where.push('session_id = ?');
+      params.push(scope.value);
     }
   }
 
