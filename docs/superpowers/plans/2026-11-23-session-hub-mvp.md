@@ -1,36 +1,36 @@
-# Session Hub —— 只读会话聚合 MVP 实现计划
+# Session Hub — Read-Only Session Aggregation MVP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在本机运行一个零依赖的只读 Web 看板，把 Claude、Codex、dsh 三处会话结构化同步到自有 SQLite 副本，并支持浏览、过滤与全文搜索。
+**Goal:** Run a zero-dependency, read-only web dashboard on the local machine that structurally syncs sessions from three sources — Claude, Codex, and dsh — into our own SQLite copy, and supports browsing, filtering, and full-text search.
 
-**Architecture:** Node 内置 HTTP 服务 + `node:sqlite` 数据库 + 原生前端。三个 source 模块只读解析各自格式，`sync.js` 按 mtime/size 增量同步进 `~/.session-hub/hub.db`，HTTP API 只读 DB，前端轮询刷新。
+**Architecture:** Node built-in HTTP server + `node:sqlite` database + vanilla frontend. Three source modules read and parse their own formats read-only; `sync.js` incrementally syncs into `~/.session-hub/hub.db` based on mtime/size; the HTTP API reads from the DB only; the frontend refreshes by polling.
 
-**Tech Stack:** Node.js ≥ 22.5（本机 v26.13.1）、`node:http`、`node:fs/promises`、`node:zlib`（zstd）、`node:sqlite`、原生 HTML/CSS/JS；零运行时依赖；`node:test` 测试。
+**Tech Stack:** Node.js ≥ 22.5 (local machine v26.13.1), `node:http`, `node:fs/promises`, `node:zlib` (zstd), `node:sqlite`, vanilla HTML/CSS/JS; zero runtime dependencies; `node:test` tests.
 
 **Spec:** `docs/superpowers/specs/2026-11-23-session-hub-design.md`
 
 ## Global Constraints
 
-- Node.js ≥ 22.5；使用内置 `node:sqlite`、`node:zlib`，不新增任何 `dependencies`。
-- 源目录严格只读：只以读取方式打开文件；应用所有写入只发生在 `SESSION_HUB_DB`（默认 `~/.session-hub/hub.db`）。
-- 服务只绑定 `127.0.0.1`，默认端口 `7317`。
-- 界面文案使用中文。
-- 子代理 / fork transcript 不进入会话列表（Claude `agent-*.jsonl`、`<sessionId>/subagents/`；Codex 带 `parent_thread_id` / `forked_from_id` / `agent_path` 的 rollout）。
-- 搜索：查询 ≥ 3 字符走 FTS5 `trigram`；1–2 字符走 `LIKE '%q%'`。
-- 每个任务结束前运行该任务的测试并提交；测试不得写入真实源目录。
+- Node.js ≥ 22.5; use the built-in `node:sqlite` and `node:zlib`; do not add any `dependencies`.
+- Source directories are strictly read-only: open files for reading only; all application writes happen only in `SESSION_HUB_DB` (default `~/.session-hub/hub.db`).
+- The server binds only to `127.0.0.1`, default port `7317`.
+- UI copy is in Chinese.
+- Subagent / fork transcripts do not enter the session list (Claude `agent-*.jsonl`, `<sessionId>/subagents/`; Codex rollouts carrying `parent_thread_id` / `forked_from_id` / `agent_path`).
+- Search: queries ≥ 3 characters use FTS5 `trigram`; 1–2 characters use `LIKE '%q%'`.
+- Run the task's tests and commit before finishing each task; tests must not write to the real source directories.
 
 ## Review Focus
 
-- 会话文件正在被追加、最后一行 JSON 不完整：解析器应跳过该行并继续，不得抛错或丢弃整个会话。测试放在 Task 5 / 6 / 7。
-- 单条工具结果特别大（数百 KB 到数 MB）：解析、入库、读回都不应崩溃，UI 默认折叠。测试放在 Task 2 / 5。
-- 某个源根目录不存在或不可读：应用仍能启动并提供其它来源，只产生 warning。测试放在 Task 9。
-- bridge 的 catalog 缺失或损坏：会话仍需列出，`chatId` 为 `null`。测试放在 Task 8 / 9。
-- 时间字段存在 ISO 字符串、秒、毫秒、`null` 四种形态：统一归一为毫秒或 `null`，不得产生 `NaN`。测试放在 Task 4。
+- A session file is being appended to and its last JSON line is incomplete: the parser should skip that line and continue, and must not throw or drop the whole session. Tests live in Task 5 / 6 / 7.
+- A single tool result is especially large (hundreds of KB to several MB): parsing, storing, and reading it back must not crash, and the UI collapses it by default. Tests live in Task 2 / 5.
+- A source root directory is missing or unreadable: the app must still start and serve the other sources, producing only a warning. Tests live in Task 9.
+- The bridge catalog is missing or corrupt: sessions must still be listed, with `chatId` as `null`. Tests live in Task 8 / 9.
+- Time fields come in four shapes — ISO string, seconds, milliseconds, `null`: normalize them uniformly to milliseconds or `null`, never producing `NaN`. Tests live in Task 4.
 
 ---
 
-### Task 1: 项目骨架与配置
+### Task 1: Project skeleton and configuration
 
 **Files:**
 - Create: `package.json`, `.gitignore`, `src/config.js`, `test/config.test.js`
@@ -44,9 +44,9 @@
   }
   ```
 
-- [ ] **Step 1: 初始化仓库与包骨架**
+- [ ] **Step 1: Initialize the repository and package skeleton**
 
-`package.json`：
+`package.json`:
 ```json
 {
   "name": "ai-agent-session-hub",
@@ -58,7 +58,7 @@
 }
 ```
 
-`.gitignore`：
+`.gitignore`:
 ```
 node_modules/
 *.db
@@ -74,9 +74,9 @@ git add package.json .gitignore docs
 git commit -m "chore: scaffold node esm project"
 ```
 
-- [ ] **Step 2: 写失败的配置测试**
+- [ ] **Step 2: Write the failing configuration tests**
 
-`test/config.test.js`：
+`test/config.test.js`:
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -84,7 +84,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 
-test('默认值', () => {
+test('defaults', () => {
   const c = loadConfig({}, []);
   assert.equal(c.host, '127.0.0.1');
   assert.equal(c.port, 7317);
@@ -96,7 +96,7 @@ test('默认值', () => {
   assert.equal(c.roots.larkChannel, path.join(os.homedir(), '.lark-channel'));
 });
 
-test('环境变量覆盖与 --rebuild', () => {
+test('environment overrides and --rebuild', () => {
   const c = loadConfig({
     SESSION_HUB_HOST: '0.0.0.0',
     SESSION_HUB_PORT: '9000',
@@ -110,26 +110,26 @@ test('环境变量覆盖与 --rebuild', () => {
   assert.deepEqual(c.roots, { claude: '/c', codex: '/x', dsh: '/d', larkChannel: '/l' });
 });
 
-test('非法端口回退默认值', () => {
+test('invalid port falls back to the default', () => {
   assert.equal(loadConfig({ SESSION_HUB_PORT: 'abc' }, []).port, 7317);
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [ ] **Step 3: Run the tests and confirm they fail**
 
 Run: `node --test test/config.test.js`
-Expected: FAIL，`Cannot find module .../src/config.js`
+Expected: FAIL, `Cannot find module .../src/config.js`
 
-- [ ] **Step 4: 实现 `src/config.js`**
+- [ ] **Step 4: Implement `src/config.js`**
 
-导出 `loadConfig(env, argv)`：按上表读取环境变量，`SESSION_HUB_PORT` 用 `Number()` 且 `Number.isFinite` 校验，无效回退 `7317`；`rebuild = argv.includes('--rebuild')`；默认路径用 `os.homedir()` + `path.join`。
+Export `loadConfig(env, argv)`: read the environment variables from the table above; parse `SESSION_HUB_PORT` with `Number()` and validate it with `Number.isFinite`, falling back to `7317` when invalid; `rebuild = argv.includes('--rebuild')`; derive default paths with `os.homedir()` + `path.join`.
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 5: Run the tests and confirm they pass**
 
 Run: `node --test test/config.test.js`
-Expected: PASS（3 个测试）
+Expected: PASS (3 tests)
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/config.js test/config.test.js
@@ -138,7 +138,7 @@ git commit -m "feat: config loader with env overrides"
 
 ---
 
-### Task 2: SQLite schema 与写入
+### Task 2: SQLite schema and writes
 
 **Files:**
 - Create: `src/schema.sql`, `src/db.js`, `test/db.test.js`
@@ -159,9 +159,9 @@ git commit -m "feat: config loader with env overrides"
               toolResults?: {callId,output,isError?}[] }
   ```
 
-- [ ] **Step 1: 写 `src/schema.sql`**
+- [ ] **Step 1: Write `src/schema.sql`**
 
-使用设计文档 §6.2 的建表语句，所有 `CREATE` 都加 `IF NOT EXISTS`（包括 `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts`），保证 `initSchema` 可重复调用。并在文件末尾加索引：
+Use the DDL from §6.2 of the design document, with `IF NOT EXISTS` on every `CREATE` (including `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts`), so `initSchema` can be called repeatedly. Add the indexes at the end of the file:
 ```sql
 CREATE INDEX IF NOT EXISTS idx_sessions_agent_updated ON sessions(agent, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_chat ON sessions(chat_id);
@@ -170,11 +170,11 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_key);
 CREATE INDEX IF NOT EXISTS idx_tool_results_session ON tool_results(session_key);
 ```
 
-- [ ] **Step 2: 写失败的 DB 测试**
+- [ ] **Step 2: Write the failing DB tests**
 
-`test/db.test.js` 用 `openDb(':memory:')`：
+`test/db.test.js` uses `openDb(':memory:')`:
 ```js
-test('replaceSession 写入会话、消息、工具与 sync_state', () => {
+test('replaceSession writes the session, messages, tools, and sync_state', () => {
   const session = { key:'claude:s1', agent:'claude', nativeId:'s1', title:'T',
     cwd:'/p', chatId:null, createdAt:1, updatedAt:2, sourcePath:'/p/s1.jsonl',
     archived:0, messageCount:2, tokens:null, extraJson:null };
@@ -193,42 +193,42 @@ test('replaceSession 写入会话、消息、工具与 sync_state', () => {
   assert.equal(hasSession(db, 'claude:s1'), true);
 });
 
-test('重新 replace 会替换旧消息且不留孤儿', () => {
-  // 同一 sourcePath 再写 1 条消息
-  // 断言 messages/tool_calls/tool_results 数量随之变成 1/0/0
+test('re-replacing a session replaces old messages and leaves no orphans', () => {
+  // write 1 more message for the same sourcePath
+  // assert messages/tool_calls/tool_results counts become 1/0/0
 });
 
-test('pruneMissing 删除不在 keepPaths 的会话与 sync_state', () => {
-  // pruneMissing(db, new Set(['/other'])) -> sessions 0，sync_state 0
+test('pruneMissing deletes sessions and sync_state rows not in keepPaths', () => {
+  // pruneMissing(db, new Set(['/other'])) -> sessions 0, sync_state 0
 });
 
-test('超大工具结果可入库并读回', () => {
-  // output = 'x'.repeat(300 * 1024)，断言 tool_results.output.length 不变
+test('oversized tool results can be stored and read back', () => {
+  // output = 'x'.repeat(300 * 1024); assert tool_results.output.length is unchanged
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [ ] **Step 3: Run the tests and confirm they fail**
 
 Run: `node --test test/db.test.js`
-Expected: FAIL，`Cannot find module .../src/db.js`
+Expected: FAIL, `Cannot find module .../src/db.js`
 
-- [ ] **Step 4: 实现 `src/db.js`**
+- [ ] **Step 4: Implement `src/db.js`**
 
-- `openDb(dbPath)`：`new DatabaseSync(dbPath)`，执行 §6.1 的 PRAGMA。
-- `initSchema(db)`：读取 `new URL('./schema.sql', import.meta.url)` 并 `db.exec()`。
-- `replaceSession`：`db.exec('BEGIN')` → `DELETE FROM messages_fts WHERE session_key = ?` → `DELETE FROM sessions WHERE source_path = ?` 或按 key 删除 → 插入会话/消息/工具/FTS → upsert `sync_state` → `COMMIT`；出错 `ROLLBACK` 后抛出。
-  - `messages.seq` 从 0 递增；`tool_calls.message_seq` / `tool_results.message_seq` 指向所属消息的 `seq`。
-  - `messages_fts` 每条 user/assistant 消息插入一行，`body` 在 JS 里拼成 `text + '\n' + (thinking ?? '')`，避免 SQL `NULL` 传播。
-  - `archived` 存 `0/1`。
-- `pruneMissing(db, keepPaths)`：事务内删除 `source_path NOT IN keepPaths` 的 sessions 与 sync_state（用临时表或分批 `SELECT` + `DELETE`），返回删除数量。
-- `clearAll(db)`：事务内依次清空 `messages_fts`、`tool_results`、`tool_calls`、`messages`、`sessions`、`sync_state`。
+- `openDb(dbPath)`: `new DatabaseSync(dbPath)`, then execute the PRAGMAs from §6.1.
+- `initSchema(db)`: read `new URL('./schema.sql', import.meta.url)` and `db.exec()` it.
+- `replaceSession`: `db.exec('BEGIN')` → `DELETE FROM messages_fts WHERE session_key = ?` → `DELETE FROM sessions WHERE source_path = ?` (or delete by key) → insert session/messages/tools/FTS → upsert `sync_state` → `COMMIT`; on error `ROLLBACK` and rethrow.
+  - `messages.seq` increments from 0; `tool_calls.message_seq` / `tool_results.message_seq` point at the owning message's `seq`.
+  - `messages_fts` gets one row per user/assistant message, with `body` assembled in JS as `text + '\n' + (thinking ?? '')`, avoiding SQL `NULL` propagation.
+  - Store `archived` as `0/1`.
+- `pruneMissing(db, keepPaths)`: inside a transaction, delete sessions and sync_state rows whose `source_path NOT IN keepPaths` (use a temp table or batched `SELECT` + `DELETE`); return the number deleted.
+- `clearAll(db)`: inside a transaction, clear `messages_fts`, `tool_results`, `tool_calls`, `messages`, `sessions`, `sync_state` in that order.
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 5: Run the tests and confirm they pass**
 
 Run: `node --test test/db.test.js`
-Expected: PASS（4 个测试）
+Expected: PASS (4 tests)
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/schema.sql src/db.js test/db.test.js
@@ -237,7 +237,7 @@ git commit -m "feat: sqlite schema and transactional session writes"
 
 ---
 
-### Task 3: 查询、详情与检索
+### Task 3: Queries, detail, and search
 
 **Files:**
 - Modify: `src/db.js`
@@ -251,21 +251,21 @@ git commit -m "feat: sqlite schema and transactional session writes"
   getFacets(db): { agents: {agent,count}[], chats: {chatId,count}[], cwds: {cwd,count}[] }
   ```
 
-- [ ] **Step 1: 写失败的查询测试**
+- [ ] **Step 1: Write the failing query tests**
 
-`test/db-query.test.js`：用 helper 写入 3 个会话：
-- `claude:a`，chat `oc_A`，cwd `/p1`，updated 300，消息含「这个项目为什么构建失败」
-- `codex:b`，chat `oc_B`，cwd `/p2`，updated 200，消息含「会话聚合」
-- `dsh:c`，chat null，cwd `/p1`，updated 100
+`test/db-query.test.js`: use a helper to write 3 sessions:
+- `claude:a`, chat `oc_A`, cwd `/p1`, updated 300, with a message containing 「这个项目为什么构建失败」
+- `codex:b`, chat `oc_B`, cwd `/p2`, updated 200, with a message containing 「会话聚合」
+- `dsh:c`, chat null, cwd `/p1`, updated 100
 
-断言：
+Assertions:
 ```js
 assert.deepEqual(listSessions(db, {}).map(s => s.key), ['claude:a','codex:b','dsh:c']); // updated_at DESC
 assert.deepEqual(listSessions(db, { agent:'codex' }).map(s => s.key), ['codex:b']);
 assert.deepEqual(listSessions(db, { chat:'oc_A' }).map(s => s.key), ['claude:a']);
 assert.deepEqual(listSessions(db, { cwd:'/p1' }).map(s => s.key), ['claude:a','dsh:c']); // updated DESC
-assert.deepEqual(listSessions(db, { q:'构建失败' }).map(s => s.key), ['claude:a']);   // 4 字符 → FTS
-assert.deepEqual(listSessions(db, { q:'会话' }).map(s => s.key), ['codex:b']);        // 2 字符 → LIKE
+assert.deepEqual(listSessions(db, { q:'构建失败' }).map(s => s.key), ['claude:a']);   // 4 characters -> FTS
+assert.deepEqual(listSessions(db, { q:'会话' }).map(s => s.key), ['codex:b']);        // 2 characters -> LIKE
 assert.equal(listSessions(db, { limit: 2 }).length, 2);
 const detail = getSession(db, 'claude:a');
 assert.equal(detail.messages.length, 2);
@@ -276,23 +276,23 @@ const facets = getFacets(db);
 assert.deepEqual(facets.agents.map(a => a.agent).sort(), ['claude','codex','dsh']);
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test test/db-query.test.js`
-Expected: FAIL，`listSessions is not a function`
+Expected: FAIL, `listSessions is not a function`
 
-- [ ] **Step 3: 实现查询函数**
+- [ ] **Step 3: Implement the query functions**
 
-- `listSessions`：动态拼 WHERE（所有过滤值用参数绑定，不拼字符串）；`q.length >= 3` 时 `session_key IN (SELECT session_key FROM messages_fts WHERE body MATCH ?)`，查询串用双引号包裹并转义内部双引号（`'"' + q.replaceAll('"','""') + '"'`），避免 FTS 语法错误；否则 `session_key IN (SELECT session_key FROM messages WHERE text LIKE ? ESCAPE '\' OR thinking LIKE ? ESCAPE '\')`，参数为转义过 `%`/`_` 的 `%q%`。默认 `includeArchived = true`；按 `updated_at DESC` 排序；`limit` 默认 500；返回行的 `archived` 转为 boolean。
-- `getSession`：查 session 行；查 messages 按 `seq`；查 tool_calls/tool_results 按 `message_seq` 组装回 Message；`archived` 转 boolean。
-- `getFacets`：`GROUP BY` 三个维度，过滤 NULL chat/cwd。
+- `listSessions`: build the WHERE clause dynamically (bind every filter value as a parameter; never concatenate strings). When `q.length >= 3`, use `session_key IN (SELECT session_key FROM messages_fts WHERE body MATCH ?)` with the query wrapped in double quotes and internal double quotes escaped (`'"' + q.replaceAll('"','""') + '"'`) to avoid FTS syntax errors; otherwise use `session_key IN (SELECT session_key FROM messages WHERE text LIKE ? ESCAPE '\' OR thinking LIKE ? ESCAPE '\')` with `%q%` where `%`/`_` are escaped. Default `includeArchived = true`; sort by `updated_at DESC`; `limit` defaults to 500; convert each row's `archived` to a boolean.
+- `getSession`: fetch the session row; fetch messages ordered by `seq`; fetch tool_calls/tool_results by `message_seq` and assemble them back into Message; convert `archived` to a boolean.
+- `getFacets`: `GROUP BY` each of the three dimensions, filtering out NULL chat/cwd.
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `node --test test/db-query.test.js`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/db.js test/db-query.test.js
@@ -301,7 +301,7 @@ git commit -m "feat: session queries, detail and fts search"
 
 ---
 
-### Task 4: 文本与时间归一化
+### Task 4: Text and time normalization
 
 **Files:**
 - Create: `src/normalize.js`
@@ -318,17 +318,17 @@ git commit -m "feat: session queries, detail and fts search"
   truncate(text: string, n: number): string
   ```
 
-- [ ] **Step 1: 写失败的归一化测试**
+- [ ] **Step 1: Write the failing normalization tests**
 
 ```js
-test('textFromContent 拼接 text block', () => {
+test('textFromContent concatenates text blocks', () => {
   assert.equal(textFromContent('hi'), 'hi');
   assert.equal(textFromContent([{type:'text',text:'a'},{type:'tool_use'},{type:'text',text:'b'}]), 'a\nb');
   assert.equal(textFromContent([{type:'input_text',text:'q'},{type:'output_text',text:'a'}]), 'q\na');
   assert.equal(textFromContent(null), '');
 });
 
-test('stripBridgeContext 与合成文本识别', () => {
+test('stripBridgeContext and synthetic text detection', () => {
   const t = '<bridge_context>{"chatId":"oc_1"}</bridge_context>\n你好';
   assert.equal(stripBridgeContext(t), '你好');
   assert.equal(isSyntheticUserText('<environment_context>...</environment_context>'), true);
@@ -336,41 +336,41 @@ test('stripBridgeContext 与合成文本识别', () => {
   assert.equal(isSyntheticUserText('你好'), false);
 });
 
-test('deriveTitle 取首行并截断', () => {
+test('deriveTitle takes the first line and truncates', () => {
   assert.equal(deriveTitle('第一行\n第二行'), '第一行');
   assert.equal(deriveTitle('<bridge_context>{}</bridge_context>\n检查构建'), '检查构建');
   assert.equal(deriveTitle('', '未命名会话'), '未命名会话');
   assert.equal(deriveTitle('x'.repeat(200)).length, 80);
 });
 
-test('toEpochMs 处理四种形态', () => {
+test('toEpochMs handles the four shapes', () => {
   assert.equal(toEpochMs('2026-11-01T00:00:00.000Z'), Date.parse('2026-11-01T00:00:00.000Z'));
-  assert.equal(toEpochMs(1795000000), 1795000000000);       // 秒
-  assert.equal(toEpochMs(1795000000000), 1795000000000);    // 毫秒
+  assert.equal(toEpochMs(1795000000), 1795000000000);       // seconds
+  assert.equal(toEpochMs(1795000000000), 1795000000000);    // milliseconds
   assert.equal(toEpochMs(null), null);
   assert.equal(toEpochMs('not a date'), null);
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test test/normalize.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 3: 实现 `src/normalize.js`**
+- [ ] **Step 3: Implement `src/normalize.js`**
 
-- `stripBridgeContext`：正则 `/<bridge_context>[\s\S]*?<\/bridge_context>/g` 删除后 `trim()`。
-- `isSyntheticUserText`：trim 去 BOM 后，匹配 `^<(environment_context|recommended_plugins|user_instructions|local-command-caveat|local-command-stdout|command-name)\b`。
-- `deriveTitle`：`stripBridgeContext` → 首个非空行 → `truncate(80)`；空则 fallback。
-- `toEpochMs`：number 且 `< 1e12` 视为秒 ×1000；字符串用 `Date.parse`；非法或 null 返回 null。
-- `textFromContent`：字符串直接返回；数组只取 `type` 为 `text` / `input_text` / `output_text` 的 `text`，用 `\n` 连接。
+- `stripBridgeContext`: remove with the regex `/<bridge_context>[\s\S]*?<\/bridge_context>/g`, then `trim()`.
+- `isSyntheticUserText`: after trimming and dropping a BOM, match `^<(environment_context|recommended_plugins|user_instructions|local-command-caveat|local-command-stdout|command-name)\b`.
+- `deriveTitle`: `stripBridgeContext` → first non-empty line → `truncate(80)`; fall back when empty.
+- `toEpochMs`: a number `< 1e12` is treated as seconds ×1000; strings go through `Date.parse`; invalid or null returns null.
+- `textFromContent`: a string is returned as-is; for arrays, take `text` from blocks whose `type` is `text` / `input_text` / `output_text`, joined with `\n`.
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `node --test test/normalize.test.js`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/normalize.js test/normalize.test.js
@@ -379,7 +379,7 @@ git commit -m "feat: text and time normalization helpers"
 
 ---
 
-### Task 5: Claude source 解析
+### Task 5: Claude source parsing
 
 **Files:**
 - Create: `src/sources/claude.js`, `test/sources-claude.test.js`, `test/fixtures/claude/session-1.jsonl`
@@ -394,9 +394,9 @@ git commit -m "feat: text and time normalization helpers"
   ParsedSession = { nativeId, title, cwd, createdAt, messages, tokens?, extra? }
   ```
 
-- [ ] **Step 1: 写 fixture**
+- [ ] **Step 1: Write the fixture**
 
-`test/fixtures/claude/session-1.jsonl`（逐行合法 JSON）：
+`test/fixtures/claude/session-1.jsonl` (one valid JSON object per line):
 ```jsonl
 {"type":"queue-operation","sessionId":"11111111-1111-4111-8111-111111111111","timestamp":"2026-11-01T00:00:00.000Z"}
 {"type":"user","sessionId":"11111111-1111-4111-8111-111111111111","cwd":"/tmp/proj","timestamp":"2026-11-01T00:00:01.000Z","message":{"role":"user","content":"帮我检查构建失败"}}
@@ -405,11 +405,11 @@ git commit -m "feat: text and time normalization helpers"
 {"type":"attachment","timestamp":"2026-11-01T00:00:04.000Z"}
 ```
 
-- [ ] **Step 2: 写失败的解析测试**
+- [ ] **Step 2: Write the failing parser tests**
 
 ```js
 const file = path.join(FIXTURES, 'claude/session-1.jsonl');
-test('parseClaude 提取消息、思考与工具结果', async () => {
+test('parseClaude extracts messages, thinking, and tool results', async () => {
   const p = await parseClaude(file);
   assert.equal(p.nativeId, '11111111-1111-4111-8111-111111111111');
   assert.equal(p.cwd, '/tmp/proj');
@@ -421,43 +421,43 @@ test('parseClaude 提取消息、思考与工具结果', async () => {
   assert.deepEqual(p.messages[1].toolCalls[0], { id:'toolu_1', name:'Bash', input:{command:'ls'} });
   assert.deepEqual(p.messages[1].toolResults[0], { callId:'toolu_1', output:'a.txt', isError:false });
 });
-test('最后一行不完整时跳过、不抛错', async () => {
-  // 复制 fixture 到临时目录，末尾追加 '{"type":"user","mess'
-  // parseClaude -> 仍返回 2 条消息
+test('skips an incomplete last line without throwing', async () => {
+  // copy the fixture to a temp directory, append '{"type":"user","mess'
+  // parseClaude -> still returns 2 messages
 });
-test('custom-title 优先，子代理文件被忽略', async () => {
-  // 临时目录：projects/p1/<uuid>.jsonl + p1/<uuid>/custom-title.json + agent-x.jsonl
-  // discoverClaude -> 只返回 1 个文件；parse 的 title 用 customTitle
+test('custom-title wins and subagent files are ignored', async () => {
+  // temp dir: projects/p1/<uuid>.jsonl + p1/<uuid>/custom-title.json + agent-x.jsonl
+  // discoverClaude -> returns only 1 file; parsed title uses customTitle
 });
-test('超大工具结果仍可解析', async () => {
-  // 构造 300KB 的 tool_result 行 -> 不抛错
+test('oversized tool results still parse', async () => {
+  // build a 300KB tool_result line -> no throw
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [ ] **Step 3: Run the tests and confirm they fail**
 
 Run: `node --test test/sources-claude.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 4: 实现 `src/sources/claude.js`**
+- [ ] **Step 4: Implement `src/sources/claude.js`**
 
-- `discoverClaude(config)`：
-  - 遍历 `${roots.claude}/projects/*/` 顶层 `*.jsonl`；basename 必须匹配 `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/`；跳过 `agent-*`。
-  - `stat` 取 mtimeMs/size；`nativeId` = 去 `.jsonl`；若存在 `<sessionId>/custom-title.json` 则读 `customTitle` 作为 `titleHint`。
-  - 目录不存在返回 `[]`，不抛错。
-- `parseClaude`：逐行 `JSON.parse`，失败的行（含末尾半行）跳过。只处理 `type` 为 `user`/`assistant`：
-  - block `text` → 文本；`thinking` → `thinking`；`tool_use` → `toolCalls`；`tool_result` → 根据 `tool_use_id` 挂到此前含该调用的消息的 `toolResults`（维护 `callId -> messageIndex`）。
-  - 无文本、无思考、无工具的消息跳过。
-  - 标题：`discovery?.titleHint || deriveTitle(首个真实用户文本) || '未命名会话'`；真实用户文本跳过 `isSyntheticUserText`。
-  - `cwd`、`createdAt` 取首个带值的条目。
-  - `nativeId` 取条目 `sessionId`，否则文件名。
+- `discoverClaude(config)`:
+  - Walk the top-level `*.jsonl` under `${roots.claude}/projects/*/`; the basename must match `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/`; skip `agent-*`.
+  - `stat` for mtimeMs/size; `nativeId` = name without `.jsonl`; if `<sessionId>/custom-title.json` exists, read `customTitle` as `titleHint`.
+  - Return `[]` when the directory does not exist; do not throw.
+- `parseClaude`: `JSON.parse` line by line, skipping failed lines (including the trailing partial line). Only handle entries whose `type` is `user`/`assistant`:
+  - block `text` → text; `thinking` → `thinking`; `tool_use` → `toolCalls`; `tool_result` → attach to the message that contained the matching call, keyed by `tool_use_id` (maintain `callId -> messageIndex`).
+  - Skip messages with no text, no thinking, and no tools.
+  - Title: `discovery?.titleHint || deriveTitle(first real user text) || '未命名会话'`; real user text skips `isSyntheticUserText` entries.
+  - `cwd`, `createdAt` come from the first entry carrying a value.
+  - `nativeId` comes from the entry's `sessionId`, falling back to the filename.
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 5: Run the tests and confirm they pass**
 
 Run: `node --test test/sources-claude.test.js`
-Expected: PASS（4 个测试）
+Expected: PASS (4 tests)
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/sources/claude.js test/sources-claude.test.js test/fixtures/claude
@@ -466,17 +466,17 @@ git commit -m "feat: claude transcript discovery and parser"
 
 ---
 
-### Task 6: Codex source 解析
+### Task 6: Codex source parsing
 
 **Files:**
 - Create: `src/sources/codex.js`, `test/sources-codex.test.js`, `test/fixtures/codex/rollout-1.jsonl`, `test/fixtures/codex/subagent.jsonl`, `test/fixtures/codex/session_index.jsonl`
 
 **Interfaces:**
-- Produces: `discoverCodex(config): Promise<DiscoveredFile[]>`、`parseCodex(sourcePath, discovery?): Promise<ParsedSession>`
+- Produces: `discoverCodex(config): Promise<DiscoveredFile[]>`, `parseCodex(sourcePath, discovery?): Promise<ParsedSession>`
 
-- [ ] **Step 1: 写 fixtures**
+- [ ] **Step 1: Write the fixtures**
 
-`rollout-1.jsonl`：
+`rollout-1.jsonl`:
 ```jsonl
 {"type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","cwd":"/tmp/codex","timestamp":"2026-11-01T00:00:00.000Z"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"检查构建失败"}]}}
@@ -485,13 +485,13 @@ git commit -m "feat: claude transcript discovery and parser"
 {"type":"response_item","payload":{"type":"function_call","id":"fc_toolu_1","call_id":"toolu_1","name":"shell","arguments":"{\"cmd\":\"ls\"}"}}
 {"type":"response_item","payload":{"type":"function_call_output","call_id":"toolu_1","output":"a.txt"}}
 ```
-`subagent.jsonl`：首行 `session_meta.payload` 带 `"parent_thread_id":"parent"`。
-`session_index.jsonl`：`{"id":"22222222-2222-4222-8222-222222222222","thread_name":"检查构建","updated_at":"2026-11-01T00:00:05.000Z"}`
+`subagent.jsonl`: the first line's `session_meta.payload` carries `"parent_thread_id":"parent"`.
+`session_index.jsonl`: `{"id":"22222222-2222-4222-8222-222222222222","thread_name":"检查构建","updated_at":"2026-11-01T00:00:05.000Z"}`
 
-- [ ] **Step 2: 写失败的测试**
+- [ ] **Step 2: Write the failing tests**
 
 ```js
-test('parseCodex 提取消息、思考、工具', async () => {
+test('parseCodex extracts messages, reasoning, and tools', async () => {
   const p = await parseCodex(rollout, { titleHint: '检查构建' });
   assert.equal(p.nativeId, '22222222-2222-4222-8222-222222222222');
   assert.equal(p.cwd, '/tmp/codex');
@@ -501,41 +501,41 @@ test('parseCodex 提取消息、思考、工具', async () => {
   assert.deepEqual(p.messages[1].toolCalls[0], { id:'toolu_1', name:'shell', input:{cmd:'ls'} });
   assert.deepEqual(p.messages[1].toolResults[0], { callId:'toolu_1', output:'a.txt', isError:false });
 });
-test('discoverCodex 读取索引标题并排除子代理', async () => {
-  // 临时 codex 根：sessions/2026/11/01/rollout-1.jsonl + subagent.jsonl + session_index.jsonl
+test('discoverCodex reads index titles and excludes subagents', async () => {
+  // temp codex root: sessions/2026/11/01/rollout-1.jsonl + subagent.jsonl + session_index.jsonl
   const files = await discoverCodex({ roots: { codex: tmpRoot } });
   assert.equal(files.length, 1);
   assert.equal(files[0].titleHint, '检查构建');
 });
-test('缺失索引时回退首条真实用户文本', async () => {
-  // 去掉 session_index.jsonl -> title === '检查构建失败'
+test('falls back to the first real user text when the index is missing', async () => {
+  // remove session_index.jsonl -> title === '检查构建失败'
 });
-test('末尾半行与未知事件被跳过', async () => {
-  // 追加半行 + {"type":"world_state"} -> 仍 2 条消息
+test('a trailing partial line and unknown events are skipped', async () => {
+  // append a partial line + {"type":"world_state"} -> still 2 messages
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [ ] **Step 3: Run the tests and confirm they fail**
 
 Run: `node --test test/sources-codex.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 4: 实现 `src/sources/codex.js`**
+- [ ] **Step 4: Implement `src/sources/codex.js`**
 
-- `discoverCodex`：遍历 `${roots.codex}/sessions/**/rollout-*.jsonl` 与 `${roots.codex}/archived_sessions/*.jsonl`（archived=true）。对每个文件只读首行判断 `payload.parent_thread_id || payload.forked_from_id || payload.agent_path`，有则跳过。读 `${roots.codex}/session_index.jsonl` 建 `id → thread_name`，作为 `titleHint`。`nativeId` 取 `payload.id || payload.session_id || 文件名中的 UUID`。
-- `parseCodex`：逐行解析；`session_meta` 取 cwd/timestamp/nativeId；`response_item`：
-  - `payload.type === 'message'` 且 role 为 `user`/`assistant` → 文本 `textFromContent(content)`；跳过 `developer`；用户文本 `isSyntheticUserText` 为真则整条跳过。
-  - `reasoning` → 暂存 `summary[].text`，挂到下一条 assistant 的 `thinking`。
-  - `function_call` / `custom_tool_call` → `{ id: payload.call_id || payload.id, name, input }`（`arguments` 尝试 `JSON.parse`，失败保留原始字符串）；`*_output` 按 `call_id` 挂到所属消息；精确匹配失败时再尝试去掉 `fc_` / `ctc_` 前缀后匹配。
-  - `event_msg`、`world_state`、`turn_context`、`token_usage_record` 忽略（token 可选取 `usage.total_tokens`）。
-  - 标题：`titleHint || deriveTitle(首条真实用户文本) || '未命名会话 · ' + nativeId.slice(0,8)`。
+- `discoverCodex`: walk `${roots.codex}/sessions/**/rollout-*.jsonl` and `${roots.codex}/archived_sessions/*.jsonl` (archived=true). For each file, read only the first line and skip it when `payload.parent_thread_id || payload.forked_from_id || payload.agent_path` is present. Read `${roots.codex}/session_index.jsonl` into an `id → thread_name` map for `titleHint`. `nativeId` comes from `payload.id || payload.session_id || the UUID in the filename`.
+- `parseCodex`: parse line by line; `session_meta` provides cwd/timestamp/nativeId; `response_item`:
+  - `payload.type === 'message'` with role `user`/`assistant` → text via `textFromContent(content)`; skip `developer`; skip an entire user message when `isSyntheticUserText` is true.
+  - `reasoning` → stash `summary[].text` and attach it as `thinking` of the next assistant message.
+  - `function_call` / `custom_tool_call` → `{ id: payload.call_id || payload.id, name, input }` (try `JSON.parse` on `arguments`, keep the raw string on failure); attach `*_output` to the owning message by `call_id`; when the exact match fails, retry after stripping the `fc_` / `ctc_` prefixes.
+  - Ignore `event_msg`, `world_state`, `turn_context`, `token_usage_record` (tokens may optionally come from `usage.total_tokens`).
+  - Title: `titleHint || deriveTitle(first real user text) || '未命名会话 · ' + nativeId.slice(0,8)`.
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 5: Run the tests and confirm they pass**
 
 Run: `node --test test/sources-codex.test.js`
 Expected: PASS
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/sources/codex.js test/sources-codex.test.js test/fixtures/codex
@@ -544,22 +544,22 @@ git commit -m "feat: codex rollout discovery and parser"
 
 ---
 
-### Task 7: dsh source 解析
+### Task 7: dsh source parsing
 
 **Files:**
 - Create: `src/sources/dsh.js`, `test/sources-dsh.test.js`
 
 **Interfaces:**
-- Produces: `discoverDsh(config): Promise<DiscoveredFile[]>`、`parseDsh(sourcePath, discovery?): Promise<ParsedSession>`
+- Produces: `discoverDsh(config): Promise<DiscoveredFile[]>`, `parseDsh(sourcePath, discovery?): Promise<ParsedSession>`
 
-- [ ] **Step 1: 写测试 helper 与失败的测试**
+- [ ] **Step 1: Write the test helper and the failing tests**
 
-helper：把 JSONL 行数组用 `zlib.zstdCompressSync(Buffer.from(lines.join('\n')))` 写入临时 `<slug>/<sessionDir>/session.v4.jsonl.zstd`。
+helper: write an array of JSONL lines with `zlib.zstdCompressSync(Buffer.from(lines.join('\n')))` into a temp `<slug>/<sessionDir>/session.v4.jsonl.zstd`.
 
 ```js
-test('parseDsh 提取元数据、标题、消息与工具', async () => {
-  // 行：session / user/message / session/title / assistant/message(text+reasoning)
-  //     / tool/call / tool/result / turn/end
+test('parseDsh extracts metadata, title, messages, and tools', async () => {
+  // lines: session / user/message / session/title / assistant/message (text+reasoning)
+  //        / tool/call / tool/result / turn/end
   const p = await parseDsh(file);
   assert.equal(p.nativeId, 'session-33333333-3333-4333-8333-333333333333');
   assert.equal(p.cwd, '/tmp/dsh');
@@ -569,40 +569,40 @@ test('parseDsh 提取元数据、标题、消息与工具', async () => {
   assert.deepEqual(p.messages[1].toolCalls[0], { id:'tool-1', name:'read', input:{path:'README.md'} });
   assert.deepEqual(p.messages[1].toolResults[0], { callId:'tool-1', output:'# README', isError:false });
 });
-test('discoverDsh 找出 zstd 会话并按目录名提取 chatId', async () => {
-  // 两个会话：session-xxx 与 lark-oc_ABC--hash
-  // files.length === 2；后者 chatHint === 'oc_ABC'
+test('discoverDsh finds zstd sessions and extracts chatId from the directory name', async () => {
+  // two sessions: session-xxx and lark-oc_ABC--hash
+  // files.length === 2; the latter has chatHint === 'oc_ABC'
 });
-test('缺少 projcache 与损坏压缩文件不影响其它会话', async () => {
-  // 一个坏 .zstd（非 zstd 字节）-> parse 抛错由调用方处理；discover 仍列出
+test('a missing projcache and a corrupt archive do not affect other sessions', async () => {
+  // one bad .zstd (not zstd bytes) -> parse throws and the caller handles it; discover still lists it
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test test/sources-dsh.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 3: 实现 `src/sources/dsh.js`**
+- [ ] **Step 3: Implement `src/sources/dsh.js`**
 
-- `discoverDsh`：遍历 `${roots.dsh}/sessions/*/*/session.v4.jsonl.zstd`；`chatHint = /^lark-(oc_[A-Za-z0-9]+)/` 匹配目录名；`stat` 取 mtime/size。
-- `parseDsh`：`zlib.zstdDecompressSync(await readFile(path))` → `split('\n')` 逐行解析：
-  - `session` → nativeId/id、cwd、createdAt
-  - `user/message` → 文本（`data.content[].text`）
-  - `assistant/message` → `data.message.content[]`，`text` / `reasoning`
-  - `session/title` → 覆盖标题（取最后一条）
-  - `tool/call` → `{callId, name, arguments}`；`tool/result` → 按 `toolCallId` 挂到所属消息（用 callId→messageIndex）
-  - `system/message` / `developer/message` 不展示
-  - 其它事件忽略
-  - 可选：若 `${roots.dsh}/storages/session_projcache/sessions/<id>.json` 存在，读 `record.rows.tokenMeasurement.val.anchor.usage.totalTokens` 作为 `tokens`
-- 标题回退：`session/title` → 首条用户文本 → `'未命名会话'`。
+- `discoverDsh`: walk `${roots.dsh}/sessions/*/*/session.v4.jsonl.zstd`; `chatHint = /^lark-(oc_[A-Za-z0-9]+)/` matched against the directory name; `stat` for mtime/size.
+- `parseDsh`: `zlib.zstdDecompressSync(await readFile(path))` → `split('\n')`, then parse line by line:
+  - `session` → nativeId/id, cwd, createdAt
+  - `user/message` → text (`data.content[].text`)
+  - `assistant/message` → `data.message.content[]`, `text` / `reasoning`
+  - `session/title` → overrides the title (take the last one)
+  - `tool/call` → `{callId, name, arguments}`; `tool/result` → attach to the owning message by `toolCallId` (using callId→messageIndex)
+  - `system/message` / `developer/message` are not displayed
+  - other events are ignored
+  - optional: if `${roots.dsh}/storages/session_projcache/sessions/<id>.json` exists, read `record.rows.tokenMeasurement.val.anchor.usage.totalTokens` as `tokens`
+- Title fallback: `session/title` → first user text → `'未命名会话'`.
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `node --test test/sources-dsh.test.js`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/sources/dsh.js test/sources-dsh.test.js
@@ -611,7 +611,7 @@ git commit -m "feat: dsh zstd session discovery and parser"
 
 ---
 
-### Task 8: 飞书会话映射
+### Task 8: Feishu chat mapping
 
 **Files:**
 - Create: `src/sources/larkMap.js`, `test/lark-map.test.js`
@@ -623,11 +623,11 @@ git commit -m "feat: dsh zstd session discovery and parser"
   chatIdFromDshDir(dirName: string): string | null
   ```
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **Step 1: Write the failing tests**
 
 ```js
-test('读取 claude/codex catalog 并建立映射', async () => {
-  // 临时 larkChannel 根：profiles/claude/sessions.json.catalog.json
+test('reads the claude/codex catalogs and builds the mapping', async () => {
+  // temp larkChannel root: profiles/claude/sessions.json.catalog.json
   //   [{scopeId:'oc_A',agentId:'claude',sessionId:'s1'}]
   // profiles/codex/sessions.json.catalog.json
   //   [{scopeId:'oc_B',agentId:'codex',threadId:'t1'}]
@@ -635,31 +635,31 @@ test('读取 claude/codex catalog 并建立映射', async () => {
   assert.equal(m.get('claude:s1'), 'oc_A');
   assert.equal(m.get('codex:t1'), 'oc_B');
 });
-test('catalog 缺失或损坏返回空映射而不抛错', async () => {
-  // 不存在 -> new Map(); 写 'not json' -> new Map()
+test('a missing or corrupt catalog returns an empty map without throwing', async () => {
+  // absent -> new Map(); write 'not json' -> new Map()
 });
-test('dsh 目录名提取 chatId', () => {
+test('extracts chatId from a dsh directory name', () => {
   assert.equal(chatIdFromDshDir('lark-oc_ABC123'), 'oc_ABC123');
   assert.equal(chatIdFromDshDir('lark-oc_ABC123--800327b4cf'), 'oc_ABC123');
   assert.equal(chatIdFromDshDir('session-abc'), null);
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test test/lark-map.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 3: 实现 `src/sources/larkMap.js`**
+- [ ] **Step 3: Implement `src/sources/larkMap.js`**
 
-读取两个 catalog（`try/catch` 吞掉缺失与解析错误），元素取 `scopeId` 与 `sessionId || threadId`，写入 `Map`。`chatIdFromDshDir` 用 `/^lark-(oc_[A-Za-z0-9]+)/`。
+Read both catalogs (a `try/catch` swallows absence and parse errors); take `scopeId` and `sessionId || threadId` from each element and write them into the `Map`. `chatIdFromDshDir` uses `/^lark-(oc_[A-Za-z0-9]+)/`.
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `node --test test/lark-map.test.js`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/sources/larkMap.js test/lark-map.test.js
@@ -668,7 +668,7 @@ git commit -m "feat: map native sessions to feishu chat ids"
 
 ---
 
-### Task 9: 同步编排
+### Task 9: Sync orchestration
 
 **Files:**
 - Create: `src/sync.js`, `test/sync.test.js`
@@ -680,64 +680,64 @@ git commit -m "feat: map native sessions to feishu chat ids"
     Promise<{ added, updated, unchanged, removed, warnings: string[] }>
   ```
 
-- [ ] **Step 1: 写失败的同步测试**
+- [ ] **Step 1: Write the failing sync tests**
 
-用临时目录构造最小的三源数据（复用 Task 5–7 的 fixture 生成逻辑），`openDb(':memory:')` + `initSchema`。
+Build minimal data for all three sources in temp directories (reusing the fixture-generation logic from Tasks 5–7), with `openDb(':memory:')` + `initSchema`.
 
 ```js
-test('首次同步写入三源会话', async () => {
+test('the first sync writes sessions from all three sources', async () => {
   const r = await syncOnce(db, config);
   assert.equal(r.added, 3);
   assert.equal(db.prepare('SELECT count(*) c FROM sessions').get().c, 3);
 });
-test('二次同步未变化时全部 unchanged', async () => {
+test('a second sync with no changes reports all unchanged', async () => {
   const r = await syncOnce(db, config);
   assert.deepEqual({ added:r.added, updated:r.updated, unchanged:r.unchanged, removed:r.removed },
                    { added:0, updated:0, unchanged:3, removed:0 });
 });
-test('追加内容只更新对应会话', async () => {
-  // 向 claude fixture 追加一条 user 行 -> updated 1, 该会话 message_count +1
+test('appending content updates only the affected session', async () => {
+  // append one user line to the claude fixture -> updated 1, that session's message_count +1
 });
-test('删除源文件后清理会话', async () => {
-  // unlink 一个文件 -> removed 1
+test('deleting a source file prunes the session', async () => {
+  // unlink one file -> removed 1
 });
-test('源根目录不存在时仍完成并产生 warning', async () => {
-  // roots 全部指向不存在路径 -> 不抛错；warnings 至少一条包含其中某个路径；sessions 0
+test('a missing source root still completes and produces a warning', async () => {
+  // all roots point at nonexistent paths -> no throw; warnings has at least one entry containing one of the paths; sessions 0
 });
-test('源根目录缺失时不会误删已有会话', async () => {
-  // 先正常同步一次；再把某个 root 指向不存在路径再同步 -> 该来源旧会话仍在，removed 0
+test('a missing source root does not wrongly delete existing sessions', async () => {
+  // sync normally once; then point one root at a nonexistent path and sync again -> that source's old sessions remain, removed 0
 });
-test('坏文件不阻塞其它会话且保留旧数据', async () => {
-  // 把某文件改成非法内容并改 mtime -> warning，其它会话仍同步
+test('a bad file does not block other sessions and keeps the old data', async () => {
+  // replace one file with invalid content and bump its mtime -> warning, other sessions still sync
 });
-test('catalog 缺失时 chatId 为 null', async () => {
-  // 不提供 larkChannel 根 -> listSessions 的 chatId 全 null
+test('chatId is null when the catalog is missing', async () => {
+  // no larkChannel root -> every chatId from listSessions is null
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test test/sync.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 3: 实现 `src/sync.js`**
+- [ ] **Step 3: Implement `src/sync.js`**
 
-1. `chatMap = opts.chatMap ?? await buildChatMap(config)`。
-2. 对每个 root 先 `stat`：不存在或不可读时 push 一条 warning（含路径），该来源按空列表处理。然后 `Promise.all([discoverClaude, discoverCodex, discoverDsh])`，各自再包 `try/catch`，失败时 push warning 并当作空列表。
-3. 对每个 `DiscoveredFile`：
-   - `getSyncState(db, sourcePath)`；未变化且 `!force` → `unchanged++`，跳过。
-   - `parseXxx`（按 agent 分派）；失败 → warning，保留旧数据。
-   - 组装 `SessionRow`：`key = agent + ':' + nativeId`；`chatId = chatMap.get(key) ?? file.chatHint ?? null`；`updatedAt = Math.floor(file.mtimeMs)`；`messageCount = messages.length`；`extraJson = JSON.stringify(parsed.extra ?? null)`。
-   - `hasSession` 判断 added/updated；`replaceSession(..., { mtimeMs, size })`。
-4. 仅当三个来源的发现都成功时执行 `pruneMissing(db, new Set(所有发现路径))` → `removed`；任何一个来源根缺失或发现失败就跳过清理，避免误删旧会话。
-5. 返回统计与 warnings。
+1. `chatMap = opts.chatMap ?? await buildChatMap(config)`.
+2. For each root, `stat` first: if it is missing or unreadable, push a warning (including the path) and treat that source as an empty list. Then `Promise.all([discoverClaude, discoverCodex, discoverDsh])`, wrapping each in `try/catch`; on failure push a warning and treat it as an empty list.
+3. For each `DiscoveredFile`:
+   - `getSyncState(db, sourcePath)`; unchanged and `!force` → `unchanged++`, skip.
+   - `parseXxx` (dispatch by agent); on failure → warning, keep the old data.
+   - Assemble the `SessionRow`: `key = agent + ':' + nativeId`; `chatId = chatMap.get(key) ?? file.chatHint ?? null`; `updatedAt = Math.floor(file.mtimeMs)`; `messageCount = messages.length`; `extraJson = JSON.stringify(parsed.extra ?? null)`.
+   - Use `hasSession` to decide added/updated; `replaceSession(..., { mtimeMs, size })`.
+4. Run `pruneMissing(db, new Set(all discovered paths))` → `removed` only when discovery succeeded for all three sources; skip pruning when any source root is missing or any discovery failed, so old sessions are never wrongly deleted.
+5. Return the statistics and warnings.
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `node --test test/sync.test.js`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/sync.js test/sync.test.js
@@ -746,7 +746,7 @@ git commit -m "feat: incremental sync orchestrator"
 
 ---
 
-### Task 10: HTTP API 与静态服务
+### Task 10: HTTP API and static serving
 
 **Files:**
 - Create: `src/server.js`, `test/server.test.js`
@@ -758,62 +758,62 @@ git commit -m "feat: incremental sync orchestrator"
   // state: { scanning: boolean; lastSyncAt: number|null; warnings: string[] }
   ```
 
-- [ ] **Step 1: 写失败的 API 测试**
+- [ ] **Step 1: Write the failing API tests**
 
-用临时 DB 写入 2 个会话，`createServer(...).listen(0)`，用 `fetch` 请求：
+Write 2 sessions into a temp DB, `createServer(...).listen(0)`, then request with `fetch`:
 
 ```js
-test('GET /api/sessions 返回列表与 facets', async () => {
+test('GET /api/sessions returns the list and facets', async () => {
   const res = await fetch(base + '/api/sessions');
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.sessions.length, 2);
   assert.ok(Array.isArray(body.facets.agents));
 });
-test('过滤与搜索参数生效', async () => {
+test('filter and search parameters take effect', async () => {
   const body = await (await fetch(base + '/api/sessions?agent=claude')).json();
   assert.equal(body.sessions.length, 1);
   const s = await (await fetch(base + '/api/sessions?q=构建失败')).json();
   assert.equal(s.sessions.length, 1);
 });
-test('GET /api/session 返回详情，未知 key 404', async () => {
+test('GET /api/session returns the detail; an unknown key is 404', async () => {
   const ok = await fetch(base + '/api/session?key=' + encodeURIComponent('claude:a'));
   assert.equal(ok.status, 200);
   assert.equal((await ok.json()).messages.length, 2);
   assert.equal((await fetch(base + '/api/session?key=nope')).status, 404);
 });
-test('GET /api/health 报告状态', async () => {
+test('GET /api/health reports status', async () => {
   const h = await (await fetch(base + '/api/health')).json();
   assert.equal(h.ok, true);
   assert.equal(h.sessions, 2);
   assert.equal(h.scanning, false);
 });
-test('静态文件与路径穿越防护', async () => {
-  // 测试用临时 publicDir，放入一个含 id="app" 的 index.html
-  // GET / -> 200 text/html，body 含 id="app"
+test('static files and path traversal protection', async () => {
+  // use a temp publicDir containing an index.html with id="app"
+  // GET / -> 200 text/html, body contains id="app"
   // GET /../package.json -> 404
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test test/server.test.js`
-Expected: FAIL，模块不存在
+Expected: FAIL, module does not exist
 
-- [ ] **Step 3: 实现 `src/server.js`**
+- [ ] **Step 3: Implement `src/server.js`**
 
-- 路由：`/api/health`、`/api/sessions`、`/api/session`、`/api/facets`；其余按路径读 `publicDir`。
-- `key` 从 query 取，`decodeURIComponent` 后传给 `getSession`。
-- 静态：`path.normalize` + `startsWith(publicDir + path.sep)` 防穿越；`index.html` 用于 `/`；设置 `Content-Type`（`text/html; charset=utf-8`、`text/javascript`、`text/css`）。
-- 所有响应加 `Cache-Control: no-store`。
-- 未知 API 路径 404 JSON；非 GET 405。
+- Routes: `/api/health`, `/api/sessions`, `/api/session`, `/api/facets`; everything else is served from `publicDir` by path.
+- Take `key` from the query, `decodeURIComponent` it, and pass it to `getSession`.
+- Static: use `path.normalize` + `startsWith(publicDir + path.sep)` to prevent traversal; serve `index.html` for `/`; set `Content-Type` (`text/html; charset=utf-8`, `text/javascript`, `text/css`).
+- Add `Cache-Control: no-store` to every response.
+- Unknown API paths return 404 JSON; non-GET returns 405.
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `node --test test/server.test.js`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/server.js test/server.test.js
@@ -822,36 +822,36 @@ git commit -m "feat: json api and static file server"
 
 ---
 
-### Task 11: 前端看板
+### Task 11: Frontend dashboard
 
 **Files:**
 - Create: `public/index.html`, `public/app.js`, `public/style.css`
 
 **Interfaces:**
-- Consumes: `/api/sessions`、`/api/session?key=`、`/api/facets`
-- Produces: 静态页面，`#app` 容器
+- Consumes: `/api/sessions`, `/api/session?key=`, `/api/facets`
+- Produces: a static page with an `#app` container
 
-- [ ] **Step 1: 写 `public/index.html`**
+- [ ] **Step 1: Write `public/index.html`**
 
-骨架：顶部筛选区（`#agent-chips`、`#search`）、左列表 `#session-list`、右详情 `#session-detail`、`#status`。加载 `app.js`、`style.css`。包含 `<div id="app">`。
+Skeleton: a top filter area (`#agent-chips`, `#search`), the list on the left (`#session-list`), the detail on the right (`#session-detail`), and `#status`. Load `app.js` and `style.css`. Include `<div id="app">`.
 
-- [ ] **Step 2: 写 `public/style.css`**
+- [ ] **Step 2: Write `public/style.css`**
 
-两栏布局（`display:grid; grid-template-columns: 360px 1fr`）；agent 色点（claude 紫、codex 绿、dsh 蓝）；消息气泡、工具 `<details>` 等宽字体；窄屏单栏。
+Two-column layout (`display:grid; grid-template-columns: 360px 1fr`); agent color dots (claude purple, codex green, dsh blue); message bubbles; tool `<details>` in a monospace font; single column on narrow screens.
 
-- [ ] **Step 3: 写 `public/app.js`**
+- [ ] **Step 3: Write `public/app.js`**
 
-- 状态：`{ agent: 'all', q: '', selected: null }`，从 `location.hash` / `localStorage` 恢复。
-- `loadSessions()`：`fetch('/api/sessions?...')` → 渲染 chips 数量与列表；每 5s 轮询。
-- `openSession(key)`：`fetch('/api/session?key=...')` → 渲染详情；每 3s 轮询，`updatedAt`/`messageCount` 变化才重绘。
-- 列表项：标题、agent、chatId（或“本地会话”）、相对时间、cwd、消息数。
-- 详情：元数据头 + 消息流；`thinking` 与每个工具调用/结果用 `<details>`；文本用 `textContent` 渲染（防 XSS）。
-- 搜索：300ms 防抖，写回 `location.hash`。
-- 空状态、加载中、错误提示。
+- State: `{ agent: 'all', q: '', selected: null }`, restored from `location.hash` / `localStorage`.
+- `loadSessions()`: `fetch('/api/sessions?...')` → render chip counts and the list; poll every 5s.
+- `openSession(key)`: `fetch('/api/session?key=...')` → render the detail; poll every 3s, repaint only when `updatedAt`/`messageCount` change.
+- List items: title, agent, chatId (or “本地会话”), relative time, cwd, message count.
+- Detail: metadata header + message stream; `thinking` and each tool call/result inside `<details>`; render text with `textContent` (XSS-safe).
+- Search: 300ms debounce, written back to `location.hash`.
+- Empty state, loading state, error messages.
 
-- [ ] **Step 4: 手动验证静态页面**
+- [ ] **Step 4: Manually verify the static page**
 
-在仓库根目录运行：
+Run from the repository root:
 ```bash
 node --input-type=module -e "
 import { openDb, initSchema } from './src/db.js';
@@ -862,9 +862,9 @@ createServer({ db, state: { scanning:false, lastSyncAt:null, warnings:[] }, publ
 "
 ```
 
-打开浏览器，确认页面能加载、无控制台报错；列表为空时显示空状态。
+Open a browser and confirm the page loads with no console errors; an empty list shows the empty state.
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add public
@@ -873,50 +873,50 @@ git commit -m "feat: read-only session hub web ui"
 
 ---
 
-### Task 12: 入口、后台同步与 README
+### Task 12: Entry point, background sync, and README
 
 **Files:**
 - Create: `src/index.js`, `README.md`
 - Modify: none
 
 **Interfaces:**
-- Consumes: `loadConfig`、`openDb` / `initSchema` / `clearAll`、`syncOnce`、`createServer`
+- Consumes: `loadConfig`, `openDb` / `initSchema` / `clearAll`, `syncOnce`, `createServer`
 
-- [ ] **Step 1: 实现 `src/index.js`**
+- [ ] **Step 1: Implement `src/index.js`**
 
-流程：
-1. `const config = loadConfig()`。
-2. `mkdir(dirname(config.dbPath), { recursive: true })`。
-3. `openDb` → `initSchema`；`config.rebuild` 时 `clearAll(db)` 并 `force` 首次同步。
-4. `state = { scanning: true, lastSyncAt: null, warnings: [] }`。
-5. 启动 `http.Server` 监听 `config.host:config.port`，打印 `Session Hub → http://host:port`。
-6. `runSync()`：若 `state.scanning` 为真直接返回（防重入）；否则 `state.scanning = true` → `try { syncOnce } finally { state.scanning = false }`，更新 `lastSyncAt`、`warnings`；`setInterval(runSync, 5000)`。
-7. `SIGINT`/`SIGTERM`：清定时器、`server.close()`、`db.close()`、退出。
+Flow:
+1. `const config = loadConfig()`.
+2. `mkdir(dirname(config.dbPath), { recursive: true })`.
+3. `openDb` → `initSchema`; when `config.rebuild`, `clearAll(db)` and force the first sync.
+4. `state = { scanning: true, lastSyncAt: null, warnings: [] }`.
+5. Start an `http.Server` listening on `config.host:config.port` and print `Session Hub → http://host:port`.
+6. `runSync()`: return immediately when `state.scanning` is true (re-entrancy guard); otherwise set `state.scanning = true` → `try { syncOnce } finally { state.scanning = false }`, update `lastSyncAt` and `warnings`; `setInterval(runSync, 5000)`.
+7. `SIGINT`/`SIGTERM`: clear the timer, `server.close()`, `db.close()`, exit.
 
-- [ ] **Step 2: 写 `README.md`**
+- [ ] **Step 2: Write `README.md`**
 
-包含：用途、只读声明、前置条件（Node ≥ 22.5，本机三处数据来源）、`npm start`、`--rebuild`、环境变量表、数据位置 `~/.session-hub/hub.db`、隐私提示（transcript 可能含密钥，不要暴露到公网）、测试命令。
+Include: purpose, the read-only statement, prerequisites (Node ≥ 22.5, the three local data sources), `npm start`, `--rebuild`, the environment variable table, data location `~/.session-hub/hub.db`, the privacy note (transcripts may contain secrets; never expose the service to the public internet), and the test command.
 
-- [ ] **Step 3: 全量测试**
+- [ ] **Step 3: Run the full test suite**
 
 Run: `npm test`
-Expected: 所有测试 PASS。
+Expected: all tests PASS.
 
-- [ ] **Step 4: 手动端到端验收**
+- [ ] **Step 4: Manual end-to-end acceptance**
 
 ```bash
 npm start
 ```
-按设计文档 §12 手动验收：
-1. 打印 URL，页面可打开。
-2. 数量符合规则：Claude 顶层 UUID（当前 52）、Codex 排除 fork（当前 18）、dsh（当前 16）。
-3. agent / chat / cwd / 搜索过滤生效。
-4. 详情消息顺序、工具折叠正确。
-5. 向某会话文件追加一行后 5s 内更新。
-6. `~/.session-hub/hub.db` 生成；删除后重启可重建；源目录内容与 mtime 未被修改。
-7. `npm test` 全绿。
+Work through the manual acceptance checklist in §12 of the design document:
+1. It prints the URL and the page opens.
+2. Counts follow the rules: Claude top-level UUID sessions (52 at the time), Codex excluding forks (18 at the time), dsh (16 at the time).
+3. agent / chat / cwd / search filters work.
+4. Detail messages are in order and tools are collapsed correctly.
+5. Appending a line to a session file updates within 5s.
+6. `~/.session-hub/hub.db` is created; deleting it and restarting rebuilds it; source directory contents and mtimes are untouched.
+7. `npm test` is all green.
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/index.js README.md
@@ -925,8 +925,8 @@ git commit -m "feat: entry point, background sync and docs"
 
 ---
 
-## 自检记录
+## Self-check notes
 
-- **Spec 覆盖**：配置（Task 1）、SQLite 副本与 schema（2–3）、三源解析（5–7）、chat 映射（8）、增量同步（9）、API（10）、UI（11）、入口/重建/README（12）、只读与安全（全局约束 + 12）。
-- **类型一致**：`DiscoveredFile` / `ParsedSession` / `SessionRow` / `Message` 在 Task 2 定义后，后续任务引用同一字段名；`listSessions` / `getSession` / `getFacets` 与 server 一致。
-- **Review Focus 落点**：半行 JSON（5/6/7）、超大工具结果（2/5）、源根缺失（9）、catalog 损坏（8/9）、时间形态（4）。
+- **Spec coverage**: configuration (Task 1), SQLite copy and schema (2–3), three-source parsing (5–7), chat mapping (8), incremental sync (9), API (10), UI (11), entry point/rebuild/README (12), read-only and security (global constraints + 12).
+- **Type consistency**: `DiscoveredFile` / `ParsedSession` / `SessionRow` / `Message` are defined in Task 2 and later tasks reference the same field names; `listSessions` / `getSession` / `getFacets` match the server.
+- **Review Focus mapping**: partial JSON lines (5/6/7), oversized tool results (2/5), missing source roots (9), corrupt catalogs (8/9), time shapes (4).
