@@ -55,6 +55,32 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- Durable change feed. AUTOINCREMENT is deliberate: without it SQLite may reuse
+-- rowids after deletes, which would break cursor semantics.
+CREATE TABLE IF NOT EXISTS events (
+  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+  type        TEXT NOT NULL,
+  session_key TEXT,
+  agent       TEXT,
+  at          INTEGER NOT NULL,
+  payload     TEXT NOT NULL
+);
+
+-- Derived turn boundaries. Written in the same transaction as the session they belong to.
+CREATE TABLE IF NOT EXISTS turns (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
+  turn_seq    INTEGER NOT NULL,
+  turn_id     TEXT,
+  status      TEXT NOT NULL,
+  signal      TEXT NOT NULL,
+  started_at  INTEGER,
+  ended_at    INTEGER,
+  prompt_seq  INTEGER,
+  final_seq   INTEGER,
+  UNIQUE(session_key, turn_seq)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   session_key UNINDEXED,
   seq UNINDEXED,
@@ -67,3 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_chat ON sessions(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session_seq ON messages(session_key, seq);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_key);
 CREATE INDEX IF NOT EXISTS idx_tool_results_session ON tool_results(session_key);
+CREATE INDEX IF NOT EXISTS idx_events_type_seq ON events(type, seq);
+CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_key, seq);
+CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
+CREATE INDEX IF NOT EXISTS idx_turns_session_seq ON turns(session_key, turn_seq);

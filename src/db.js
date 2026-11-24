@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { sessionId } from './session-id.js';
 import { oneLine } from './normalize.js';
+import { eventEnvelope } from './events.js';
 
 const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const dbPaths = new WeakMap();
@@ -165,9 +166,124 @@ export function clearAll(db) {
       DELETE FROM tool_results;
       DELETE FROM tool_calls;
       DELETE FROM messages;
+      DELETE FROM turns;
+      DELETE FROM events;
       DELETE FROM sessions;
       DELETE FROM sync_state;
+      DELETE FROM sqlite_sequence WHERE name IN ('events', 'turns');
     `);
+  });
+}
+
+export function appendEvent(db, {
+  type, sessionKey = null, agent = null, at = Date.now(), payload = {}
+}) {
+  return Number(db.prepare(
+    'INSERT INTO events (type, session_key, agent, at, payload) VALUES (?, ?, ?, ?, ?)'
+  ).run(type, sessionKey, agent, at, JSON.stringify(payload)).lastInsertRowid);
+}
+
+// Highest seq ever assigned, even when every row has been pruned. sqlite_sequence
+// tracks AUTOINCREMENT values independently of table contents.
+export function getLastEventSeq(db) {
+  let sequence = 0;
+  try {
+    sequence = db.prepare(
+      "SELECT seq FROM sqlite_sequence WHERE name = 'events'"
+    ).get()?.seq ?? 0;
+  } catch {}
+  const present = db.prepare('SELECT max(seq) AS seq FROM events').get()?.seq ?? 0;
+  return Math.max(Number(sequence), Number(present));
+}
+
+export function eventsSince(db, {
+  since = 0,
+  limit = 200,
+  maxBytes = 8 * 1024 * 1024,
+  agents = null,
+  types = null
+} = {}) {
+  const head = getLastEventSeq(db);
+  const oldest = db.prepare('SELECT min(seq) AS seq FROM events').get()?.seq ?? null;
+  const resync = since > 0 && (
+    since > head || (oldest !== null && since + 1 < oldest)
+  );
+
+  const where = ['seq > ?'];
+  const params = [since];
+  if (Array.isArray(agents)) {
+    if (agents.length === 0) where.push('0');
+    else {
+      where.push(`agent IN (${agents.map(() => '?').join(', ')})`);
+      params.push(...agents);
+    }
+  }
+  if (Array.isArray(types)) {
+    if (types.length === 0) where.push('0');
+    else {
+      where.push(`type IN (${types.map(() => '?').join(', ')})`);
+      params.push(...types);
+    }
+  }
+
+  const rows = db.prepare(`
+    SELECT seq, type, session_key AS sessionKey, agent, at, payload
+    FROM events WHERE ${where.join(' AND ')} ORDER BY seq ASC LIMIT ?
+  `).all(...params, limit + 1);
+
+  const events = [];
+  let bytes = 0;
+  for (const row of rows) {
+    if (events.length >= limit) break;
+    const envelope = eventEnvelope(row);
+    const size = Buffer.byteLength(JSON.stringify(envelope));
+    if (events.length > 0 && bytes + size > maxBytes) break;
+    events.push(envelope);
+    bytes += size;
+  }
+
+  const hasMore = events.length < rows.length;
+  let cursor = events.length > 0 ? events[events.length - 1].seq : since;
+  if (events.length === 0 && resync) cursor = head;
+
+  return { events, cursor, hasMore, resync };
+}
+
+export function pruneEvents(db, {
+  maxAgeMs = 7 * 24 * 60 * 60 * 1000,
+  maxRows = 50_000,
+  maxBytes = 256 * 1024 * 1024,
+  now = Date.now()
+} = {}) {
+  return transaction(db, () => {
+    let removed = Number(db.prepare(
+      'DELETE FROM events WHERE at < ?'
+    ).run(now - maxAgeMs).changes);
+
+    const count = db.prepare('SELECT count(*) AS c FROM events').get().c;
+    if (count > maxRows) {
+      removed += Number(db.prepare(`
+        DELETE FROM events WHERE seq NOT IN (
+          SELECT seq FROM events ORDER BY seq DESC LIMIT ?
+        )
+      `).run(maxRows).changes);
+    }
+
+    let total = 0;
+    let cutoff = null;
+    for (const row of db.prepare(
+      'SELECT seq, length(payload) AS size FROM events ORDER BY seq DESC'
+    ).all()) {
+      total += Number(row.size);
+      if (total > maxBytes) {
+        cutoff = row.seq;
+        break;
+      }
+    }
+    if (cutoff !== null) {
+      removed += Number(db.prepare('DELETE FROM events WHERE seq <= ?').run(cutoff).changes);
+    }
+    return removed;
   });
 }
 
