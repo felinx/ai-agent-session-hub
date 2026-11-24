@@ -50,11 +50,138 @@ function transaction(db, fn) {
   }
 }
 
-export function replaceSession(db, session, messages, sync) {
+function latestSummary(messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const text = messages[i]?.text;
+    if (typeof text === 'string' && text.trim() !== '') return oneLine(text, 80);
+  }
+  return '';
+}
+
+function buildTurnObject(fields, promptMessage, finalMessage, overrides = {}) {
+  const prompt = {
+    seq: fields.promptSeq,
+    at: promptMessage?.at ?? null,
+    role: promptMessage?.role ?? 'user',
+    text: overrides.promptText ?? promptMessage?.text ?? ''
+  };
+  const final = finalMessage
+    ? {
+      seq: fields.finalSeq,
+      at: finalMessage.at ?? null,
+      role: finalMessage.role ?? 'assistant',
+      text: overrides.finalText ?? finalMessage.text ?? ''
+    }
+    : null;
+  return {
+    sessionKey: fields.sessionKey,
+    turnSeq: fields.turnSeq,
+    turnId: fields.turnId ?? null,
+    status: fields.status,
+    signal: fields.signal,
+    startedAt: fields.startedAt ?? null,
+    endedAt: fields.endedAt ?? null,
+    promptSeq: fields.promptSeq,
+    finalSeq: fields.finalSeq,
+    prompt,
+    final,
+    summary: final ? oneLine(final.text ?? '', 80) : ''
+  };
+}
+
+function appendSessionEvent(db, session, messages, kind, now) {
+  appendEvent(db, {
+    type: `session.${kind}`,
+    sessionKey: session.key,
+    agent: session.agent,
+    at: now,
+    payload: {
+      session: {
+        key: session.key,
+        id: sessionId(session.key),
+        agent: session.agent,
+        project: session.cwd ? path.basename(session.cwd) : null,
+        cwd: session.cwd ?? null,
+        title: session.title ?? '',
+        messageCount: session.messageCount ?? messages.length,
+        updatedAt: session.updatedAt ?? null,
+        summary: latestSummary(messages),
+        lastMessageSeq: messages.length ? messages.length - 1 : null,
+        archived: !!session.archived
+      }
+    }
+  });
+}
+
+// Turns are persisted like messages: same transaction, rewritten on every parse.
+// Only turns that were not already terminal (or whose status changed) reach the feed,
+// so re-parsing an unchanged file does not replay old completions.
+function insertTurns(db, session, messages, turns, priorTurns, now) {
+  const priorStatus = new Map();
+  for (const row of priorTurns) {
+    priorStatus.set(row.turnId ?? `#${row.turnSeq}`, row.status);
+  }
+
+  const insert = db.prepare(`
+    INSERT INTO turns (
+      session_key, turn_seq, turn_id, status, signal,
+      started_at, ended_at, prompt_seq, final_seq
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let turnSeq = 0;
+  for (const turn of turns ?? []) {
+    const promptSeq = turn.promptIndex;
+    if (!Number.isInteger(promptSeq) || !messages[promptSeq]) continue;
+    const finalSeq = Number.isInteger(turn.finalIndex) ? turn.finalIndex : null;
+    const finalMessage = finalSeq === null ? null : messages[finalSeq];
+    if (finalSeq !== null && !finalMessage) continue;
+
+    turnSeq += 1;
+    const fields = {
+      sessionKey: session.key,
+      turnSeq,
+      turnId: turn.turnId ?? null,
+      status: turn.status ?? 'completed',
+      signal: turn.signal ?? 'native',
+      startedAt: turn.startedAt ?? null,
+      endedAt: turn.endedAt ?? null,
+      promptSeq,
+      finalSeq
+    };
+    insert.run(
+      fields.sessionKey, turnSeq, fields.turnId, fields.status, fields.signal,
+      fields.startedAt, fields.endedAt, promptSeq, finalSeq
+    );
+
+    const key = fields.turnId ?? `#${turnSeq}`;
+    const previous = priorStatus.get(key);
+    if (previous === undefined || previous !== fields.status) {
+      const turnObject = buildTurnObject(fields, messages[promptSeq], finalMessage, {
+        promptText: turn.promptText,
+        finalText: turn.finalText
+      });
+      appendEvent(db, {
+        type: 'turn.completed',
+        sessionKey: session.key,
+        agent: session.agent,
+        at: fields.endedAt ?? now,
+        payload: { turn: turnObject }
+      });
+    }
+  }
+}
+
+export function replaceSession(db, session, messages, sync, {
+  kind = null, turns = [], now = Date.now()
+} = {}) {
   transaction(db, () => {
     const replaced = db.prepare(
       'SELECT source_path FROM sessions WHERE key = ? OR source_path = ?'
     ).all(session.key, session.sourcePath);
+    const priorTurns = db.prepare(
+      'SELECT turn_seq AS turnSeq, turn_id AS turnId, status FROM turns WHERE session_key = ?'
+    ).all(session.key);
 
     db.prepare('DELETE FROM messages_fts WHERE session_key = ?').run(session.key);
     db.prepare('DELETE FROM sessions WHERE key = ? OR source_path = ?')
@@ -116,6 +243,9 @@ export function replaceSession(db, session, messages, sync) {
       }
     });
 
+    if (kind) appendSessionEvent(db, session, messages, kind, now);
+    insertTurns(db, session, messages, turns, priorTurns, now);
+
     db.prepare(`
       INSERT INTO sync_state (source_path, mtime_ms, size, last_synced_at)
       VALUES (?, ?, ?, ?)
@@ -138,7 +268,7 @@ export function hasSession(db, key) {
   return !!db.prepare('SELECT 1 FROM sessions WHERE key = ?').get(key);
 }
 
-export function pruneMissing(db, keepPaths) {
+export function pruneMissing(db, keepPaths, { events = false, now = Date.now() } = {}) {
   return transaction(db, () => {
     const deleteFts = db.prepare('DELETE FROM messages_fts WHERE session_key = ?');
     const deleteSession = db.prepare('DELETE FROM sessions WHERE key = ?');
@@ -147,6 +277,17 @@ export function pruneMissing(db, keepPaths) {
     const removed = [];
     for (const row of db.prepare('SELECT key, agent, title, source_path FROM sessions').all()) {
       if (!keepPaths.has(row.source_path)) {
+        if (events) {
+          appendEvent(db, {
+            type: 'session.removed',
+            sessionKey: row.key,
+            agent: row.agent,
+            at: now,
+            payload: {
+              session: { key: row.key, id: sessionId(row.key), agent: row.agent }
+            }
+          });
+        }
         deleteFts.run(row.key);
         deleteSession.run(row.key);
         removed.push({ key: row.key, agent: row.agent, title: row.title });
@@ -407,8 +548,117 @@ export function getSession(db, key) {
   return { session: toSession(row), messages };
 }
 
-export function countVisibleSessions(db, options = {}) {
-  const visible = visibilityWhere(options);
+const TURN_COLUMNS = `
+  session_key AS sessionKey, turn_seq AS turnSeq, turn_id AS turnId, status, signal,
+  started_at AS startedAt, ended_at AS endedAt, prompt_seq AS promptSeq, final_seq AS finalSeq
+`;
+
+function getTurnRow(db, key, turnSeq) {
+  return db.prepare(
+    `SELECT ${TURN_COLUMNS} FROM turns WHERE session_key = ? AND turn_seq = ?`
+  ).get(key, turnSeq) ?? null;
+}
+
+function turnEndSeq(db, key, row) {
+  if (row.finalSeq !== null) return row.finalSeq;
+  return db.prepare(
+    'SELECT max(seq) AS seq FROM messages WHERE session_key = ?'
+  ).get(key)?.seq ?? row.promptSeq;
+}
+
+function messageRow(db, key, seq) {
+  if (seq === null || seq === undefined) return null;
+  return db.prepare(
+    'SELECT seq, role, at, text FROM messages WHERE session_key = ? AND seq = ?'
+  ).get(key, seq) ?? null;
+}
+
+export function getTurn(db, key, turnSeq) {
+  const row = getTurnRow(db, key, turnSeq);
+  if (!row) return null;
+  const turn = buildTurnObject(
+    row, messageRow(db, key, row.promptSeq), messageRow(db, key, row.finalSeq)
+  );
+  const end = turnEndSeq(db, key, row);
+  const counts = db.prepare(`
+    SELECT
+      (SELECT count(*) FROM messages WHERE session_key = ? AND seq >= ? AND seq <= ?) AS messageCount,
+      (SELECT count(*) FROM tool_calls WHERE session_key = ? AND message_seq >= ? AND message_seq <= ?) AS toolCallCount,
+      (SELECT count(*) FROM tool_results WHERE session_key = ? AND message_seq >= ? AND message_seq <= ?) AS toolResultCount
+  `).get(
+    key, row.promptSeq, end,
+    key, row.promptSeq, end,
+    key, row.promptSeq, end
+  );
+  return { turn, ...counts };
+}
+
+export function getTurnMessages(db, key, turnSeq, {
+  after = null, limit = 200, maxBytes = 2 * 1024 * 1024
+} = {}) {
+  const row = getTurnRow(db, key, turnSeq);
+  if (!row) return null;
+
+  const end = turnEndSeq(db, key, row);
+  const startAfter = Number.isInteger(after) ? after : row.promptSeq - 1;
+  const pageSize = Math.max(1, Math.min(Number.isInteger(limit) ? limit : 200, 1000));
+  const rows = db.prepare(`
+    SELECT seq, role, at, text, thinking FROM messages
+    WHERE session_key = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?
+  `).all(key, startAfter, end, pageSize + 1);
+
+  const callsBySeq = new Map();
+  for (const call of db.prepare(`
+    SELECT message_seq AS seq, call_id AS callId, name, input_json AS inputJson
+    FROM tool_calls WHERE session_key = ? AND message_seq > ? AND message_seq <= ? ORDER BY id
+  `).all(key, startAfter, end)) {
+    let input = null;
+    try { input = JSON.parse(call.inputJson ?? 'null'); } catch {}
+    if (!callsBySeq.has(call.seq)) callsBySeq.set(call.seq, []);
+    callsBySeq.get(call.seq).push({ id: call.callId, name: call.name, input });
+  }
+
+  const resultsBySeq = new Map();
+  for (const result of db.prepare(`
+    SELECT message_seq AS seq, call_id AS callId, output, is_error AS isError
+    FROM tool_results WHERE session_key = ? AND message_seq > ? AND message_seq <= ? ORDER BY id
+  `).all(key, startAfter, end)) {
+    if (!resultsBySeq.has(result.seq)) resultsBySeq.set(result.seq, []);
+    resultsBySeq.get(result.seq).push({
+      callId: result.callId, output: result.output ?? '', isError: !!result.isError
+    });
+  }
+
+  const messages = [];
+  let bytes = 0;
+  for (const rowMessage of rows) {
+    if (messages.length >= pageSize) break;
+    const message = {
+      seq: rowMessage.seq,
+      role: rowMessage.role,
+      at: rowMessage.at,
+      text: rowMessage.text ?? '',
+      toolCalls: callsBySeq.get(rowMessage.seq) ?? [],
+      toolResults: resultsBySeq.get(rowMessage.seq) ?? []
+    };
+    if (rowMessage.thinking !== null) message.thinking = rowMessage.thinking;
+    const size = Buffer.byteLength(JSON.stringify(message));
+    if (messages.length > 0 && bytes + size > maxBytes) break;
+    messages.push(message);
+    bytes += size;
+  }
+
+  return {
+    turn: {
+      sessionKey: key, turnSeq: row.turnSeq, promptSeq: row.promptSeq, finalSeq: row.finalSeq
+    },
+    messages,
+    hasMore: messages.length < rows.length,
+    nextAfter: messages.length ? messages[messages.length - 1].seq : startAfter
+  };
+}
+
+export function countVisibleSessions(db, options = {}) {  const visible = visibilityWhere(options);
   const where = [visible];
   const params = [];
   addAgentsFilter(where, params, options.agents);
