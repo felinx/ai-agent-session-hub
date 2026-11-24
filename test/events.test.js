@@ -148,11 +148,13 @@ test('pruneEvents trims the byte budget from the oldest rows', () => {
   db.close();
 });
 
-test('clearAll also clears the event log and resets the cursor', () => {
+test('clearAll clears the event log without rewinding the cursor', () => {
   const db = freshDb();
   append(db, 'sync.completed');
+  append(db, 'sync.completed');
   clearAll(db);
-  assert.equal(getLastEventSeq(db), 0);
-  assert.equal(append(db, 'sync.completed'), 1);
+  assert.deepEqual(eventsSince(db, { since: 0 }).events, []);
+  assert.equal(getLastEventSeq(db), 2);
+  assert.equal(append(db, 'sync.completed'), 3);
   db.close();
 });

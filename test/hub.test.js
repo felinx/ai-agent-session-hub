@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -65,4 +66,36 @@ test('close waits for the sync in flight before closing the database', async () 
   await hub.close();
   assert.equal(finished, true);
   assert.throws(() => hub.db.prepare('SELECT 1').get());
+});
+
+test('close terminates open event streams instead of waiting for them', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'session-hub-hub-'));
+  const hub = await startHub({
+    config: testConfig(dir),
+    publicDir,
+    emit: () => {},
+    syncInterval: 60_000
+  });
+
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port: hub.port,
+    path: '/api/events/stream?since=now',
+    headers: { accept: 'text/event-stream' }
+  });
+  req.on('error', () => {});
+  const connected = new Promise(resolve => {
+    req.once('response', res => { res.once('data', resolve); });
+  });
+  req.end();
+  await connected;
+
+  try {
+    await Promise.race([
+      hub.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('hub.close hung')), 2000))
+    ]);
+  } finally {
+    req.destroy();
+  }
 });

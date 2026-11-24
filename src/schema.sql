@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS turns (
   ended_at    INTEGER,
   prompt_seq  INTEGER,
   final_seq   INTEGER,
+  prompt_text TEXT,
+  final_text  TEXT,
   UNIQUE(session_key, turn_seq)
 );
 

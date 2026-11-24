@@ -98,7 +98,11 @@ export async function startHub({
     clearInterval(timer);
     // Let a sync that already started finish before the database goes away.
     if (syncPromise) await syncPromise;
-    await new Promise(resolve => server.close(resolve));
+    const serverClosed = new Promise(resolve => server.close(resolve));
+    // SSE streams and long polls never end on their own; drop their sockets so
+    // shutdown does not wait for a client that is still connected.
+    server.closeAllConnections?.();
+    await serverClosed;
     db.close();
   }
 

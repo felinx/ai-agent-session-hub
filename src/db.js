@@ -35,6 +35,11 @@ export function openDb(dbPath) {
 
 export function initSchema(db) {
   db.exec(schemaSql);
+  // Existing databases predate the turn text columns; add them in place so
+  // /api/turn can rebuild the same text the event carried.
+  const columns = new Set(db.prepare('PRAGMA table_info(turns)').all().map(row => row.name));
+  if (!columns.has('prompt_text')) db.exec('ALTER TABLE turns ADD COLUMN prompt_text TEXT');
+  if (!columns.has('final_text')) db.exec('ALTER TABLE turns ADD COLUMN final_text TEXT');
   secureDbFiles(dbPaths.get(db));
 }
 
@@ -125,8 +130,8 @@ function insertTurns(db, session, messages, turns, priorTurns, now) {
   const insert = db.prepare(`
     INSERT INTO turns (
       session_key, turn_seq, turn_id, status, signal,
-      started_at, ended_at, prompt_seq, final_seq
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      started_at, ended_at, prompt_seq, final_seq, prompt_text, final_text
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   let turnSeq = 0;
@@ -151,7 +156,8 @@ function insertTurns(db, session, messages, turns, priorTurns, now) {
     };
     insert.run(
       fields.sessionKey, turnSeq, fields.turnId, fields.status, fields.signal,
-      fields.startedAt, fields.endedAt, promptSeq, finalSeq
+      fields.startedAt, fields.endedAt, promptSeq, finalSeq,
+      turn.promptText ?? null, turn.finalText ?? null
     );
 
     const key = fields.turnId ?? `#${turnSeq}`;
@@ -308,6 +314,8 @@ export function pruneMissing(db, keepPaths, { events = false, now = Date.now() }
 }
 
 export function clearAll(db) {
+  // The events sequence is deliberately kept: consumers hold cursors, and rewinding
+  // seq after a rebuild would make stale cursors skip the new events.
   transaction(db, () => {
     db.exec(`
       DELETE FROM messages_fts;
@@ -318,7 +326,7 @@ export function clearAll(db) {
       DELETE FROM events;
       DELETE FROM sessions;
       DELETE FROM sync_state;
-      DELETE FROM sqlite_sequence WHERE name IN ('events', 'turns');
+      DELETE FROM sqlite_sequence WHERE name = 'turns';
     `);
   });
 }
@@ -557,7 +565,8 @@ export function getSession(db, key) {
 
 const TURN_COLUMNS = `
   session_key AS sessionKey, turn_seq AS turnSeq, turn_id AS turnId, status, signal,
-  started_at AS startedAt, ended_at AS endedAt, prompt_seq AS promptSeq, final_seq AS finalSeq
+  started_at AS startedAt, ended_at AS endedAt, prompt_seq AS promptSeq, final_seq AS finalSeq,
+  prompt_text AS promptText, final_text AS finalText
 `;
 
 function getTurnRow(db, key, turnSeq) {
@@ -566,8 +575,14 @@ function getTurnRow(db, key, turnSeq) {
   ).get(key, turnSeq) ?? null;
 }
 
+// A turn without a final message ends before the next turn's prompt; bounding it by
+// the session's last message would leak later turns into /api/turn and /api/turn/messages.
 function turnEndSeq(db, key, row) {
   if (row.finalSeq !== null) return row.finalSeq;
+  const next = db.prepare(
+    'SELECT min(prompt_seq) AS seq FROM turns WHERE session_key = ? AND turn_seq > ?'
+  ).get(key, row.turnSeq)?.seq;
+  if (next !== null && next !== undefined) return next - 1;
   return db.prepare(
     'SELECT max(seq) AS seq FROM messages WHERE session_key = ?'
   ).get(key)?.seq ?? row.promptSeq;
@@ -584,7 +599,10 @@ export function getTurn(db, key, turnSeq) {
   const row = getTurnRow(db, key, turnSeq);
   if (!row) return null;
   const turn = buildTurnObject(
-    row, messageRow(db, key, row.promptSeq), messageRow(db, key, row.finalSeq)
+    row,
+    messageRow(db, key, row.promptSeq),
+    messageRow(db, key, row.finalSeq),
+    { promptText: row.promptText ?? undefined, finalText: row.finalText ?? undefined }
   );
   const end = turnEndSeq(db, key, row);
   const counts = db.prepare(`

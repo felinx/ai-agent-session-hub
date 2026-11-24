@@ -224,3 +224,45 @@ test('pruneMissing appends a removal event in the same transaction when asked', 
   assert.equal(db.prepare('SELECT count(*) c FROM turns').get().c, 0);
   db.close();
 });
+
+test('getTurn reconstructs the overridden prompt and final text stored with the turn', () => {
+  const db = freshDb();
+  seed(db, {}, {
+    turns: [{
+      ...TURNS[0], promptText: '完整提问', finalText: '第一段\n第二段'
+    }]
+  });
+  const event = eventsSince(db, { since: 0, types: ['turn.completed'] }).events[0];
+  const detail = getTurn(db, 'claude:s1', 1);
+  assert.equal(detail.turn.prompt.text, event.turn.prompt.text);
+  assert.equal(detail.turn.final.text, event.turn.final.text);
+  db.close();
+});
+
+test('a turn with no final message ends before the next turn', () => {
+  const db = freshDb();
+  replaceSession(db, makeSession({ messageCount: 3 }), [
+    { role: 'user', at: 100, text: '失败的问题' },
+    { role: 'user', at: 200, text: '第二问' },
+    { role: 'assistant', at: 210, text: '第二答' }
+  ], SYNC, {
+    kind: 'created',
+    turns: [
+      {
+        turnId: 't1', status: 'error', signal: 'native',
+        startedAt: 100, endedAt: 110, promptIndex: 0, finalIndex: null
+      },
+      {
+        turnId: 't2', status: 'completed', signal: 'native',
+        startedAt: 200, endedAt: 210, promptIndex: 1, finalIndex: 2
+      }
+    ]
+  });
+
+  const detail = getTurn(db, 'claude:s1', 1);
+  assert.equal(detail.messageCount, 1);
+  const messages = getTurnMessages(db, 'claude:s1', 1);
+  assert.deepEqual(messages.messages.map(message => message.seq), [0]);
+  assert.equal(messages.messages[0].text, '失败的问题');
+  db.close();
+});
