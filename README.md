@@ -161,3 +161,9 @@ public/              Frontend dashboard
   viewer.html/.js    Read-only file viewer with line numbers
   icons/             Agent icons
 ```
+
+## License
+
+[Apache License 2.0](LICENSE) — Copyright (c) 2026 Agent Session Hub.
+
+Agent names and icons belong to their respective owners and are used for identification only.

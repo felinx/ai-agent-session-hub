@@ -161,3 +161,9 @@ public/              前端看板
   viewer.html/.js    只读文件查看器（带行号）
   icons/             Agent 图标
 ```
+
+## 许可证
+
+[Apache License 2.0](LICENSE) — Copyright (c) 2026 Agent Session Hub。
+
+各 Agent 名称与图标归其各自所有者，仅用于标识。
