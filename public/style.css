@@ -174,8 +174,7 @@ body {
   display: block;
 }
 
-.section[open] > .section-head .chevron,
-.project[open] > .project-head .chevron {
+.section[open] > .section-head .chevron {
   transform: rotate(90deg);
   color: #727981;
 }
@@ -222,8 +221,21 @@ body {
 
 .project-head::-webkit-details-marker { display: none; }
 
-.project:not([open]) > .project-head .project-icon {
-  color: #8a9099;
+.project-icon .folder {
+  display: inline-flex;
+}
+
+.project-icon .folder-open {
+  display: none;
+  color: #3b82f6;
+}
+
+.project[open] > .project-head .folder-closed {
+  display: none;
+}
+
+.project[open] > .project-head .folder-open {
+  display: inline-flex;
 }
 
 .project-head:hover { background: #ececee; }

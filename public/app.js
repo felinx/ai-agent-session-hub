@@ -34,8 +34,11 @@ function saveKeySet(key, set) {
 const expandedProjects = loadKeySet(`${STORAGE_PREFIX}expanded-projects`);
 const closedSections = loadKeySet(`${STORAGE_PREFIX}closed-sections`);
 
-const FOLDER_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
+const FOLDER_CLOSED_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
   '<path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.6c.4 0 .78.16 1.06.44L10.1 5.9H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z"/></svg>';
+
+const FOLDER_OPEN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>';
 
 const CHEVRON_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M6 4l4 4-4 4"/></svg>';
@@ -214,9 +217,11 @@ function projectNode(group) {
     ...(expandedProjects.has(key) ? { open: '' } : {})
   }, [
     el('summary', { class: 'project-head' }, [
-      el('span', { class: 'project-icon', html: FOLDER_ICON }),
-      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) }),
-      el('span', { class: 'chevron', html: CHEVRON_ICON })
+      el('span', { class: 'project-icon' }, [
+        el('span', { class: 'folder folder-closed', html: FOLDER_CLOSED_ICON }),
+        el('span', { class: 'folder folder-open', html: FOLDER_OPEN_ICON })
+      ]),
+      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) })
     ]),
     el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
   ]);
