@@ -4,16 +4,16 @@ import { groupSessionsByProject } from './group.js';
 const state = {
   agent: 'all',
   q: '',
-  chat: '',
-  cwd: '',
   since: '',
-  view: 'flat',
   selected: null,
   sessions: [],
   facets: { agents: [], chats: [], cwds: [] },
   detailSignature: null,
   loadingSessions: false
 };
+
+const collapsedProjects = new Set();
+const collapsedSections = new Set();
 
 const $ = (selector) => document.querySelector(selector);
 const listEl = $('#session-list');
@@ -24,7 +24,6 @@ const statusEl = $('#status');
 const searchEl = $('#search');
 const chipsEl = $('#agent-chips');
 const filtersEl = $('#filters');
-const viewToggleEl = $('#view-toggle');
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -61,10 +60,7 @@ function writeHash() {
   const params = new URLSearchParams();
   if (state.agent !== 'all') params.set('agent', state.agent);
   if (state.q) params.set('q', state.q);
-  if (state.chat) params.set('chat', state.chat);
-  if (state.cwd) params.set('cwd', state.cwd);
   if (state.since) params.set('since', state.since);
-  if (state.view === 'projects') params.set('view', 'projects');
   if (state.selected) params.set('session', state.selected);
   const next = params.toString();
   const target = next ? `#${next}` : location.pathname;
@@ -75,10 +71,7 @@ function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   state.agent = params.get('agent') || 'all';
   state.q = params.get('q') || '';
-  state.chat = params.get('chat') || '';
-  state.cwd = params.get('cwd') || '';
   state.since = params.get('since') || '';
-  state.view = params.get('view') === 'projects' ? 'projects' : 'flat';
   state.selected = params.get('session') || null;
   searchEl.value = state.q;
 }
@@ -127,18 +120,7 @@ function selectEl(name, options, value) {
 }
 
 function renderFilters() {
-  const chats = state.facets.chats ?? [];
-  const cwds = state.facets.cwds ?? [];
-
   filtersEl.replaceChildren(
-    selectEl('chat', [
-      ['', '所有 chat'],
-      ...chats.map(item => [item.chatId, item.chatId])
-    ], state.chat),
-    selectEl('cwd', [
-      ['', '所有目录'],
-      ...cwds.map(item => [item.cwd, `${item.cwd} (${item.count})`])
-    ], state.cwd),
     selectEl('since', [
       ['', '所有时间'],
       ['86400000', '24 小时内'],
@@ -148,33 +130,12 @@ function renderFilters() {
   );
 }
 
-const VIEWS = [
-  ['flat', '平铺'],
-  ['projects', '项目']
-];
-
-function renderViewToggle() {
-  viewToggleEl.replaceChildren(...VIEWS.map(([value, label]) => {
-    const active = state.view === value;
-    return el('button', {
-      class: `view-btn${active ? ' active' : ''}`,
-      type: 'button',
-      'aria-pressed': String(active),
-      onclick: () => {
-        if (state.view === value) return;
-        state.view = value;
-        writeHash();
-        renderList();
-      }
-    }, label);
-  }));
-}
-
 function sessionItem(session) {
   return el('li', {
     class: `session-item${state.selected === session.key ? ' active' : ''}`,
     tabindex: '0',
     role: 'button',
+    title: session.title,
     onclick: () => openSession(session.key),
     onkeydown: (event) => {
       if (event.key === 'Enter' || event.key === ' ') openSession(session.key);
@@ -184,13 +145,7 @@ function sessionItem(session) {
       el('span', { class: `dot ${session.agent}` }),
       el('strong', { class: 'session-title', text: session.title }),
       el('span', { class: 'session-time', text: relativeTime(session.updatedAt) })
-    ]),
-    el('div', { class: 'session-meta' }, [
-      el('span', { class: 'badge', text: session.agent }),
-      el('span', { text: session.chatId || '本地会话' }),
-      el('span', { text: `${session.messageCount} 条消息` })
-    ]),
-    el('div', { class: 'session-cwd', text: session.cwd || '（无 cwd）' })
+    ])
   ]);
 }
 
@@ -200,27 +155,51 @@ function projectLabel(cwd) {
   return parts.at(-1) || cwd;
 }
 
+function sidebarSection(label, bodyNode) {
+  const details = el('details', {
+    class: 'section',
+    ...(collapsedSections.has(label) ? {} : { open: '' })
+  }, [
+    el('summary', { class: 'section-head', text: label }),
+    bodyNode
+  ]);
+  details.addEventListener('toggle', () => {
+    if (details.open) collapsedSections.delete(label);
+    else collapsedSections.add(label);
+  });
+  return el('li', { class: 'sidebar-section' }, [details]);
+}
+
+function projectNode(group) {
+  const key = group.cwd ?? '';
+  const details = el('details', {
+    class: 'project',
+    ...(collapsedProjects.has(key) ? {} : { open: '' })
+  }, [
+    el('summary', { class: 'project-head' }, [
+      el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) }),
+      el('span', { class: 'project-count', text: String(group.sessions.length) })
+    ]),
+    el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
+  ]);
+  details.addEventListener('toggle', () => {
+    if (details.open) collapsedProjects.delete(key);
+    else collapsedProjects.add(key);
+  });
+  return el('li', { class: 'project-group' }, [details]);
+}
+
 function renderList() {
-  renderViewToggle();
   listEl.replaceChildren();
   emptyEl.hidden = state.sessions.length > 0;
+  if (!state.sessions.length) return;
 
-  if (state.view === 'projects') {
-    for (const group of groupSessionsByProject(state.sessions)) {
-      listEl.append(el('li', { class: 'project-group' }, [
-        el('details', { class: 'project', open: '' }, [
-          el('summary', { class: 'project-head' }, [
-            el('span', { class: 'project-name', title: group.cwd || '未归类', text: projectLabel(group.cwd) }),
-            el('span', { class: 'project-count', text: String(group.sessions.length) })
-          ]),
-          el('ul', { class: 'session-list project-sessions' }, group.sessions.map(sessionItem))
-        ])
-      ]));
-    }
-    return;
-  }
+  const projectGroups = groupSessionsByProject(state.sessions).map(projectNode);
 
-  for (const session of state.sessions) listEl.append(sessionItem(session));
+  listEl.append(
+    sidebarSection('项目', el('ul', { class: 'project-groups' }, projectGroups)),
+    sidebarSection('最近', el('ul', { class: 'session-list recent-sessions' }, state.sessions.map(sessionItem)))
+  );
 }
 
 function statusLine(health) {
@@ -239,8 +218,6 @@ async function loadSessions() {
   const params = new URLSearchParams();
   if (state.agent !== 'all') params.set('agent', state.agent);
   if (state.q) params.set('q', state.q);
-  if (state.chat) params.set('chat', state.chat);
-  if (state.cwd) params.set('cwd', state.cwd);
   if (state.since) params.set('since', String(Date.now() - Number(state.since)));
 
   try {

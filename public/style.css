@@ -129,42 +129,48 @@ body {
   padding: 10px;
 }
 
-.list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4px 10px;
+.sidebar-section {
+  list-style: none;
 }
 
-.list-heading {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.view-toggle {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 8px;
-  background: #eef1f5;
-}
-
-.view-btn {
+.section {
+  margin: 0 0 10px;
+  padding: 0;
   border: none;
   background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 6px;
-  cursor: pointer;
 }
 
-.view-btn:hover { color: var(--text); }
+.section-head {
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
 
-.view-btn.active {
-  background: #fff;
-  color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+.section-head::-webkit-details-marker { display: none; }
+
+.section-head::before {
+  content: '▾';
+  display: inline-block;
+  width: 12px;
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+.section:not([open]) > .section-head::before {
+  content: '▸';
+}
+
+.section-head:hover { background: #f2f5f9; }
+
+.project-groups {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .project-group {
@@ -242,7 +248,7 @@ body {
 }
 
 .session-item {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius);
   cursor: pointer;
@@ -274,23 +280,6 @@ body {
 .session-time {
   color: var(--muted);
   font-size: 11px;
-  white-space: nowrap;
-}
-
-.session-meta {
-  display: flex;
-  gap: 10px;
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.session-cwd {
-  margin-top: 3px;
-  color: #9aa1ac;
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
