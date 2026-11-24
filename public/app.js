@@ -25,7 +25,8 @@ const state = {
   settingsInfo: null,
   settingsSaving: false,
   settingsStatus: '',
-  settingsStatusKind: ''
+  settingsStatusKind: '',
+  statusInfo: null
 };
 
 function tr(key, params) {
@@ -79,6 +80,8 @@ const jumpTopEl = $('#jump-top');
 const jumpBottomEl = $('#jump-bottom');
 const settingsEl = $('#settings-view');
 const settingsButtonEl = $('#settings-button');
+const statusViewEl = $('#status-view');
+const statusButtonEl = $('#status-button');
 const statusEl = $('#status');
 const searchEl = $('#search');
 const chipsEl = $('#agent-chips');
@@ -189,7 +192,7 @@ function writeHash() {
   if (state.q) params.set('q', state.q);
   if (state.since) params.set('since', state.since);
   if (state.selected) params.set('session', state.selected);
-  if (state.view === 'settings') params.set('view', 'settings');
+  if (state.view !== 'chat') params.set('view', state.view);
   const next = params.toString();
   const target = next ? `#${next}` : location.pathname;
   history.replaceState(null, '', target);
@@ -201,21 +204,26 @@ function readHash() {
   state.q = params.get('q') || '';
   state.since = params.get('since') || '';
   state.selected = params.get('session') || null;
-  state.view = params.get('view') === 'settings' ? 'settings' : 'chat';
+  const view = params.get('view');
+  state.view = view === 'settings' || view === 'status' ? view : 'chat';
   searchEl.value = state.q;
 }
 
 function renderView() {
   const settingsOpen = state.view === 'settings';
-  detailEl.hidden = settingsOpen;
+  const statusOpen = state.view === 'status';
+  detailEl.hidden = settingsOpen || statusOpen;
   settingsEl.hidden = !settingsOpen;
+  statusViewEl.hidden = !statusOpen;
   settingsButtonEl.classList.toggle('active', settingsOpen);
   settingsButtonEl.setAttribute('aria-pressed', String(settingsOpen));
+  statusButtonEl.classList.toggle('active', statusOpen);
+  statusButtonEl.setAttribute('aria-pressed', String(statusOpen));
   updateJumpButtons();
 }
 
 function updateJumpButtons() {
-  if (state.view === 'settings' || !state.selected) {
+  if (state.view !== 'chat' || !state.selected) {
     jumpEl.hidden = true;
     return;
   }
@@ -253,6 +261,8 @@ function applyLanguage() {
   chipsEl.setAttribute('aria-label', tr('chip.aria'));
   const settingsLabel = settingsButtonEl.querySelector('span');
   if (settingsLabel) settingsLabel.textContent = tr('settings.button');
+  const statusLabel = statusButtonEl.querySelector('span');
+  if (statusLabel) statusLabel.textContent = tr('status.button');
   emptyEl.textContent = tr('list.empty');
   renderFilters();
   if (state.listSignature !== null) {
@@ -267,10 +277,13 @@ function applyLanguage() {
   if (state.view === 'settings' && state.settingsInfo) {
     renderSettings();
   }
+  if (state.view === 'status' && state.statusInfo) {
+    renderStatus();
+  }
   if (state.selected) {
     state.detailSignature = null;
-    if (state.view !== 'settings') refreshDetail();
-  } else if (state.view !== 'settings') {
+    if (state.view === 'chat') refreshDetail();
+  } else if (state.view === 'chat') {
     detailEl.replaceChildren(el('p', { class: 'empty', text: tr('detail.pick') }));
   }
   updateJumpButtons();
@@ -633,6 +646,13 @@ function renderDetail(detail) {
           agentIcon(session.agent),
           el('span', { text: session.agent })
         ]),
+        session.id
+          ? el('span', {
+              class: 'session-id',
+              title: tr('detail.sessionId', { id: session.id }),
+              text: `#${session.id}`
+            })
+          : null,
         el('span', { text: session.chatId ? tr('detail.chat', { chatId: session.chatId }) : tr('detail.localSession') }),
         el('span', { text: tr('detail.updatedAt', { time: formatTime(session.updatedAt) }) }),
         el('span', { text: tr('detail.messageCount', { count: session.messageCount }) }),
@@ -664,7 +684,7 @@ async function openSession(key) {
 }
 
 async function refreshDetail() {
-  if (state.view === 'settings') return;
+  if (state.view !== 'chat') return;
   if (!state.selected) return;
   try {
     const res = await fetch(`/api/session?key=${encodeURIComponent(state.selected)}`);
@@ -866,6 +886,93 @@ function renderSettings() {
   );
 }
 
+function statusAgentCard(stat) {
+  const latest = stat.latest;
+  return el('section', { class: 'settings-card status-card' }, [
+    el('header', { class: 'status-card-head' }, [
+      el('span', { class: 'agent-label' }, [
+        agentIcon(stat.agent),
+        el('span', { text: stat.agent })
+      ]),
+      el('span', {
+        class: 'status-card-sync',
+        text: stat.lastSyncAt ? tr('status.agentLastSync', { time: formatTime(stat.lastSyncAt) }) : tr('status.neverScan')
+      })
+    ]),
+    el('p', { class: 'status-card-stats' }, [
+      el('span', { text: tr('status.totalSessions', { count: stat.sessions }) }),
+      el('span', { text: tr('status.totalMessages', { count: stat.messages }) })
+    ]),
+    latest
+      ? el('div', { class: 'status-latest' }, [
+          el('p', { class: 'status-latest-label', text: tr('status.latestTitle') }),
+          el('button', {
+            class: 'status-latest-link',
+            type: 'button',
+            title: tr('status.openLatest'),
+            onclick: () => openSession(latest.key)
+          }, [
+            el('span', { class: 'session-id', text: `#${latest.id}` }),
+            el('span', {
+              class: 'status-latest-summary',
+              text: latest.summary || tr('status.noSummary')
+            })
+          ])
+        ])
+      : el('p', { class: 'empty', text: tr('status.latestEmpty') })
+  ]);
+}
+
+function renderStatus() {
+  const info = state.statusInfo;
+  if (!info) {
+    statusViewEl.replaceChildren(el('p', { class: 'empty', text: tr('status.loading') }));
+    return;
+  }
+
+  const scanText = info.scanning
+    ? tr('status.scanActive')
+    : info.lastSyncAt ? tr('status.lastScan', { time: formatTime(info.lastSyncAt) }) : tr('status.neverScan');
+
+  statusViewEl.replaceChildren(
+    el('div', { class: 'settings-inner' }, [
+      el('header', { class: 'settings-head' }, [
+        el('div', {}, [
+          el('p', { class: 'settings-eyebrow', text: tr('status.eyebrow') }),
+          el('h2', { text: tr('status.title') })
+        ]),
+        el('button', { class: 'settings-back', type: 'button', onclick: closeStatus }, [
+          el('span', { class: 'back-icon', html: CHEVRON_ICON }),
+          tr('status.back')
+        ])
+      ]),
+      el('p', { class: 'settings-intro', text: tr('status.intro') }),
+      el('div', { class: 'status-summary' }, [
+        el('span', { class: 'status-pill', text: tr('status.totalSessions', { count: info.totals.sessions }) }),
+        el('span', { class: 'status-pill', text: tr('status.totalMessages', { count: info.totals.messages }) }),
+        el('span', { class: 'status-pill', text: scanText })
+      ]),
+      el('div', { class: 'status-grid' }, info.agents.map(statusAgentCard))
+    ])
+  );
+}
+
+async function loadStatus() {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    state.statusInfo = await res.json();
+    if (state.view === 'status') renderStatus();
+  } catch (error) {
+    if (state.view === 'status') {
+      statusViewEl.replaceChildren(el('p', {
+        class: 'error',
+        text: tr('status.loadFailed', { message: error.message })
+      }));
+    }
+  }
+}
+
 async function fetchSettings() {
   const res = await fetch('/api/settings');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -921,6 +1028,22 @@ function closeSettings() {
   }
 }
 
+function openStatus() {
+  state.view = 'status';
+  writeHash();
+  renderView();
+  statusViewEl.scrollTop = 0;
+  if (state.statusInfo) renderStatus();
+  else {
+    statusViewEl.replaceChildren(el('p', { class: 'empty', text: tr('status.loading') }));
+    loadStatus();
+  }
+}
+
+function closeStatus() {
+  closeSettings();
+}
+
 async function updateSettings(patch) {
   if (state.settingsSaving) return;
   state.settingsSaving = true;
@@ -965,6 +1088,11 @@ settingsButtonEl.addEventListener('click', () => {
   else openSettings();
 });
 
+statusButtonEl.addEventListener('click', () => {
+  if (state.view === 'status') closeStatus();
+  else openStatus();
+});
+
 jumpTopEl.addEventListener('click', () => scrollDetailTo('top'));
 jumpBottomEl.addEventListener('click', () => scrollDetailTo('bottom'));
 detailEl.addEventListener('scroll', updateJumpButtons, { passive: true });
@@ -987,10 +1115,14 @@ async function init() {
   renderView();
   loadSessions();
   if (state.view === 'settings') loadSettings();
+  else if (state.view === 'status') loadStatus();
   else if (state.selected) openSession(state.selected);
 
   setInterval(loadSessions, 5000);
   setInterval(refreshDetail, 3000);
+  setInterval(() => {
+    if (state.view === 'status') loadStatus();
+  }, 5000);
 }
 
 init();

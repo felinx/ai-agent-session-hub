@@ -189,6 +189,8 @@ body {
 }
 
 .sidebar-footer {
+  display: flex;
+  gap: 6px;
   flex: none;
   padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
@@ -199,7 +201,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border: none;
   border-radius: 8px;
@@ -1218,4 +1221,97 @@ pre.tool {
   .topbar {
     padding: 10px 12px;
   }
+}
+
+.session-id {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.status-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.status-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.status-grid .settings-card {
+  margin-top: 0;
+}
+
+.status-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.status-card-sync {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-card-stats {
+  display: flex;
+  gap: 12px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.status-latest {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.status-latest-label {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.status-latest-link {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.status-latest-link:hover {
+  border-color: var(--border);
+  background: #f7f7f8;
+}
+
+.status-latest-summary {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
