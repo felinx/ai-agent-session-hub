@@ -103,27 +103,34 @@ async function copyToClipboard(text) {
   }
 }
 
+const COPY_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="7" y="7" width="9" height="10" rx="2"/>' +
+  '<path d="M13 4H6a2 2 0 0 0-2 2v8"/></svg>';
+
 function copyButton(readText) {
   let timer;
   const button = el('button', {
     class: 'copy-btn',
     type: 'button',
-    title: '复制这段内容',
+    'data-tooltip': '复制',
     'aria-label': '复制',
+    html: COPY_ICON,
     onclick: async (event) => {
       event.preventDefault();
       event.stopPropagation();
       const text = typeof readText === 'function' ? readText() : readText;
       const ok = await copyToClipboard(text ?? '');
-      button.textContent = ok ? '已复制' : '复制失败';
+      button.dataset.tooltip = ok ? '已复制' : '复制失败';
+      button.setAttribute('aria-label', ok ? '已复制' : '复制失败');
       button.classList.toggle('copied', ok);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        button.textContent = '复制';
+        button.dataset.tooltip = '复制';
+        button.setAttribute('aria-label', '复制');
         button.classList.remove('copied');
       }, 1500);
     }
-  }, ['复制']);
+  });
   return button;
 }
 
