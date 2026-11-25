@@ -153,6 +153,8 @@ Events are ordered by a monotonically increasing `seq` and delivered at least on
 
 Events are pruned after 7 days, beyond the newest 50,000 rows, or above 256 MB of payload. A cursor older than the retained window returns `resync: true`; bootstrap again from a session snapshot. The feed is local-only, GET-only, and never leaves `127.0.0.1`. Because `turn.completed` and the turn endpoints contain full transcripts, treat them as privately as the sessions themselves.
 
+The full design — event model, turn detection signals, delivery semantics, and roadmap — is in [`docs/design/session-events.md`](docs/design/session-events.md).
+
 ## Privacy and security
 
 - Session content may contain code, paths, secrets, and personal conversations. **Do not** expose this service to the public internet or forward it to others.

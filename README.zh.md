@@ -153,6 +153,8 @@ node bin/session-hub.js doctor    # 检查 Node、本地副本、日志、来源
 
 事件保留 7 天、最多最新 50,000 行、载荷不超过 256 MB，任一条件先到即裁剪。游标早于保留窗口时返回 `resync: true`，需从会话快照重新引导。事件流仅限本机、仅 GET，不会离开 `127.0.0.1`。由于 `turn.completed` 与 turn 接口包含完整会话原文，请按会话本身的私密级别对待。
 
+完整的事件模型、轮次判定信号、投递语义与路线图见 [`docs/design/session-events.md`](docs/design/session-events.md)。
+
 ## 隐私与安全
 
 - 会话内容可能包含代码、路径、密钥、个人对话。**不要**把本服务暴露到公网或转发给他人。
