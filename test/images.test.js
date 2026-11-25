@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveImageSource } from '../public/images.js';
+import { resolveImageSource } from '../web/images.js';
 
 test('relative paths point to the local asset endpoint for the current session', () => {
   assert.equal(

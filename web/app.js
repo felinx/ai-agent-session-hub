@@ -107,7 +107,7 @@ function el(tag, props = {}, children = []) {
 function agentIcon(agent, alt = '') {
   return el('img', {
     class: 'agent-icon',
-    src: `/icons/${agent}.png`,
+    src: `/assets/icons/${agent}.png`,
     alt
   });
 }

@@ -4,10 +4,10 @@ import { openDb, initSchema, clearAll } from './db.js';
 import { syncOnce } from './sync.js';
 import { createServer } from './server.js';
 import { getSettings } from './settings.js';
-import { formatWarning, resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
+import { formatWarning, resolveLanguage, t, detectSystemLanguage } from '../web/i18n.js';
 import { stamp, describeSync } from './log.js';
 
-export const defaultPublicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+export const defaultPublicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 
 function listen(server, port, host) {
   return new Promise((resolve, reject) => {

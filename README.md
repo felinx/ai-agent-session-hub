@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo-banner-light.svg" alt="Agent Session Hub" width="720">
+  <img src="web/assets/logo-banner-light.svg" alt="Agent Session Hub" width="720">
 </p>
 
 # Agent Session Hub
@@ -11,6 +11,10 @@ English | [中文](README.zh.md)
 Agent Session Hub reads those session files directly, parses them into one structure, and serves a single local, **read-only** page for browsing, searching, and filtering all of them. It needs **no bridge, plugin, or configuration inside the agents** — if the agent wrote its session files, Session Hub can show them.
 
 Today it understands Claude Code, Codex, DeepSeek Harness (dsh), and WorkBuddy. The source list is deliberately open: adding another agent is one parser module, and the dashboard, database, search, and API stay the same.
+
+<p align="center">
+  <img src="web/assets/agent-session-hub-screenshot.jpg" alt="Agent Session Hub dashboard" width="720">
+</p>
 
 ## Why Agent Session Hub
 
@@ -198,15 +202,14 @@ src/
     dsh.js           dsh zstd session discovery and parsing
     workbuddy.js     WorkBuddy JSONL session discovery and parsing
     larkMap.js       Lark chat mapping (optional)
-public/              Frontend dashboard
+web/                 Frontend dashboard
   i18n.js            Shared Chinese/English message catalog
   format.js          Markdown subset renderer (escapes first, then formats)
   links.js           Local-file link detection and viewer URLs
   images.js          Resolves session image paths to the asset endpoint
   app.js             Session list, detail, settings, status
   viewer.html/.js    Read-only file viewer with line numbers
-  icons/             Agent icons
-  logo-banner-light.svg  Banner shown at the top of this README
+  assets/            Images, icons, and the README screenshot
 ```
 
 ## License

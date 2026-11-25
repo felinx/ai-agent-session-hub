@@ -1,6 +1,6 @@
 // Log formatting: timestamps and per-session sync change lines. Side-effect free so it can be unit tested.
 
-import { t } from '../public/i18n.js';
+import { t } from '../web/i18n.js';
 
 function pad(value) {
   return String(value).padStart(2, '0');

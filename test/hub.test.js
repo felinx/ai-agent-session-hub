@@ -7,7 +7,7 @@ import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { startHub } from '../src/hub.js';
 
-const publicDir = path.join(import.meta.dirname, '..', 'public');
+const publicDir = path.join(import.meta.dirname, '..', 'web');
 
 function testConfig(dir) {
   const empty = path.join(dir, 'missing');

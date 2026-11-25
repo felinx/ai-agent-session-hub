@@ -291,7 +291,7 @@ Everything returns JSON (UTF-8); errors return `{error}` with a 4xx/5xx status.
 | GET | `/api/session?key=<agent:nativeId>` | Metadata + messages ordered by time |
 | GET | `/api/facets` | Count per agent, chatId list, cwd list |
 | GET | `/api/health` | `{ok, scanning, sessions, warnings}` |
-| GET | `/` and static assets | Served from `public/` |
+| GET | `/` and static assets | Served from `web/` |
 
 - Search scope: user / assistant text and thinking (not tool output, to avoid noise and index bloat). `q` of ≥ 3 characters uses FTS5 trigram; 1–2 characters use `LIKE` (see §6.2).
 - A file that fails to parse goes into `warnings` and does not affect other sessions.
@@ -363,7 +363,7 @@ ai-agent-session-hub/
 │       ├── codex.js
 │       ├── dsh.js
 │       └── larkMap.js
-├── public/
+├── web/
 │   ├── index.html
 │   ├── app.js
 │   └── style.css

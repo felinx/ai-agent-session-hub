@@ -8,7 +8,7 @@ import {
 } from './db.js';
 import { serializeEvent, resolveSince } from './events.js';
 import { getSettings, saveSettings, SUPPORTED_AGENTS } from './settings.js';
-import { t, resolveLanguage, formatWarning, detectSystemLanguage } from '../public/i18n.js';
+import { t, resolveLanguage, formatWarning, detectSystemLanguage } from '../web/i18n.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

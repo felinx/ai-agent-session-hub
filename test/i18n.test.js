@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { t, resolveLanguage, MESSAGES } from '../public/i18n.js';
+import { t, resolveLanguage, MESSAGES } from '../web/i18n.js';
 
 test('resolveLanguage follows the explicit preference or falls back to the system language', () => {
   assert.equal(resolveLanguage('zh', 'en-US'), 'zh');

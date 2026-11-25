@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jumpButtonState, jumpScrollBehavior } from '../public/scroll.js';
+import { jumpButtonState, jumpScrollBehavior } from '../web/scroll.js';
 
 test('hides jump buttons when the content is too short to scroll', () => {
   assert.deepEqual(

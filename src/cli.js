@@ -8,7 +8,7 @@ import { startDaemon, stopDaemon, writeDaemonFile, removeDaemonFile } from './da
 import { tailLines, clearLogs, followLogs } from './logs.js';
 import { runDoctor, formatChecks } from './doctor.js';
 import { stamp } from './log.js';
-import { resolveLanguage, t, detectSystemLanguage } from '../public/i18n.js';
+import { resolveLanguage, t, detectSystemLanguage } from '../web/i18n.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 

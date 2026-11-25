@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { escapeHtml, renderMarkdown, formatMaybeJson } from '../public/format.js';
+import { escapeHtml, renderMarkdown, formatMaybeJson } from '../web/format.js';
 
 test('escapeHtml escapes tags and quotes', () => {
   assert.equal(

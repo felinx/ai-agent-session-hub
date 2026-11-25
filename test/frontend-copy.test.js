@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { messagePlainText, toolResultPlainText } from '../public/copy.js';
+import { messagePlainText, toolResultPlainText } from '../web/copy.js';
 
 test('messagePlainText joins thinking, text, tool calls, and tool results in order', () => {
   const text = messagePlainText({

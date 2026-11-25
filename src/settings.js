@@ -1,4 +1,4 @@
-import { LANGUAGE_PREFERENCES } from '../public/i18n.js';
+import { LANGUAGE_PREFERENCES } from '../web/i18n.js';
 
 export const SUPPORTED_AGENTS = [
   { id: 'claude', name: 'Claude Code' },

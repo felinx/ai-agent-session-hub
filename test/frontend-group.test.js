@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { groupSessionsByProject } from '../public/group.js';
+import { groupSessionsByProject } from '../web/group.js';
 
 function s(key, cwd, updatedAt) {
   return { key, cwd, updatedAt };

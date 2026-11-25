@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isLocalFilePath, viewerUrl } from '../public/links.js';
+import { isLocalFilePath, viewerUrl } from '../web/links.js';
 
 test('absolute file paths keep the line-number fragment and include the session', () => {
   assert.equal(

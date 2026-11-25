@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo-banner-light.svg" alt="Agent Session Hub" width="720">
+  <img src="web/assets/logo-banner-light.svg" alt="Agent Session Hub" width="720">
 </p>
 
 # Agent Session Hub
@@ -11,6 +11,10 @@
 Agent Session Hub 直接读取这些会话文件，解析成统一结构，再提供一个本地、**只读**的页面集中浏览、搜索和筛选。**不需要 bridge、插件，也不需要改 Agent 里的任何配置**——只要 Agent 把会话写到了本地，Session Hub 就能展示。
 
 目前支持 Claude Code、Codex、DeepSeek Harness（dsh）与 WorkBuddy。来源列表是开放的：新增一个 Agent 只需要一个解析模块，看板、数据库、搜索与 API 都保持不变。
+
+<p align="center">
+  <img src="web/assets/agent-session-hub-screenshot.jpg" alt="Agent Session Hub 界面截图" width="720">
+</p>
 
 ## 为什么需要 Agent Session Hub
 
@@ -198,15 +202,14 @@ src/
     dsh.js           dsh zstd 会话发现与解析
     workbuddy.js     WorkBuddy JSONL 会话发现与解析
     larkMap.js       飞书 chat 映射（可选）
-public/              前端看板
+web/                 前端看板
   i18n.js            中英文共享文案目录
   format.js          Markdown 子集渲染（先转义再格式化）
   links.js           本地文件链接识别与查看页地址
   images.js          会话图片路径解析为图片接口地址
   app.js             会话列表、详情、设置、状态
   viewer.html/.js    只读文件查看器（带行号）
-  icons/             Agent 图标
-  logo-banner-light.svg  README 顶部横幅
+  assets/            图片、图标与 README 截图
 ```
 
 ## 许可证
